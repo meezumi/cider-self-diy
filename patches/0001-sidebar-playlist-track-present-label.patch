@@ -1,0 +1,41 @@
+--- a/src/renderer/views/components/sidebar-playlist.ejs
++++ b/src/renderer/views/components/sidebar-playlist.ejs
+@@ -54,8 +54,7 @@
+         children: [],
+         playlistRoot: "p.playlistsroot",
+         renaming: false,
+-        icon: "",
+-        hasRelatedMediaItems: false
++        icon: ""
+       }
+     },
+     async mounted() {
+@@ -64,14 +63,21 @@
+       } else {
+         this.icon = ("./assets/feather/folder.svg")
+       }
+-      let playlistMap = this.$root.playlists.trackMapping
+-      if (this.relateMediaItems.length != 0) {
+-        if (playlistMap[this.relateMediaItems[0]]) {
+-          if (playlistMap[this.relateMediaItems[0]].includes(this.item.id)) {
+-            this.hasRelatedMediaItems = true
+-          }
++    },
++    computed: {
++      // Was a one-shot lookup in mounted(). Vue mounts children before parents,
++      // so relateMediaItems was still the empty default every time and this
++      // never became true. As a computed it re-evaluates when the prop lands.
++      hasRelatedMediaItems() {
++        if (!this.relateMediaItems || this.relateMediaItems.length === 0) {
++          return false
++        }
++        const playlistMap = this.$root.playlists.trackMapping
++        if (!playlistMap) {
++          return false
+         }
+-
++        const owners = playlistMap[this.relateMediaItems[0]]
++        return Array.isArray(owners) && owners.includes(this.item.id)
+       }
+     },
+     methods: {
