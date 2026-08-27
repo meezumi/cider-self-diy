@@ -1,0 +1,46 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -763,11 +763,43 @@
+           },
+         )
+         .then(() => {
++          app.recordPlaylistTrackMapping(pid, pitems);
+           if (app.page === "playlist_" + pid) {
+             app.getPlaylistFromID(app.showingPlaylist.id, true);
+           }
+         });
+     },
++    // The POST above succeeded, so the tracks really are in the playlist now.
++    // trackMapping is otherwise only ever rebuilt by a full deepScan in
++    // refreshPlaylists(), so without this the "(Track present)" label stays
++    // wrong until the next scan or a restart.
++    recordPlaylistTrackMapping(pid, pitems) {
++      if (!this.cfg.advanced.playlistTrackMapping) {
++        return;
++      }
++      const trackMapping = this.playlists.trackMapping;
++      if (!trackMapping) {
++        return;
++      }
++      let changed = false;
++      (pitems || []).forEach((item) => {
++        if (!item || !item.id) {
++          return;
++        }
++        const owners = trackMapping[item.id];
++        if (!owners) {
++          // New key: Vue 2 cannot detect a plain property addition.
++          this.$set(trackMapping, item.id, [pid]);
++          changed = true;
++        } else if (!owners.includes(pid)) {
++          owners.push(pid);
++          changed = true;
++        }
++      });
++      if (changed) {
++        CiderCache.putCache("library-playlists-tracks", trackMapping);
++      }
++    },
+     async addSelectedToPlaylist(playlist_id) {
+       let self = this;
+       let pl_items = [];
