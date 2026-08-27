@@ -2,7 +2,7 @@
 
 Nobody else is actively maintaining this build of [Cider](https://cider.sh)
 anymore, so I decided to take matters into my own hands and add patches as I
-see fit. This is for personal use — my machine, my install, my annoyances.
+see fit. This is for personal use — ain't gonna pay for Cider v2 .
 
 Cider 1.x is no longer developed upstream. The build I run is **1.6.3**, from
 the AUR (`cider 1.6.3.20260321034536-2`). When something in it is broken, the
