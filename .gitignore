@@ -1,0 +1,6 @@
+# Never commit Cider's archive: it is ~96 MiB of upstream AGPL source plus
+# bundled node_modules. This repo ships patches, not artifacts.
+build/
+node_modules/
+*.asar
+*.asar.unpacked/

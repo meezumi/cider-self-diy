@@ -1,0 +1,10 @@
+{
+  "name": "cider-self-diy",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Personal patches for Cider 1.6.3, applied to app.asar locally.",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@electron/asar": "4.2.0"
+  }
+}
