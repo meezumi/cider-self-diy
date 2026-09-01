@@ -1,0 +1,22 @@
+--- a/src/renderer/views/pages/library-albums.ejs
++++ b/src/renderer/views/pages/library-albums.ejs
+@@ -18,7 +18,7 @@
+                            style="width:100%;"
+                            spellcheck="false"
+                            :placeholder="$root.getLz('term.search') + '...'"
+-                           @input="$root.searchLibraryAlbums"
++                           @input="$root.searchLibraryAlbums(1)"
+                            v-model="library.albums.search" class="search-input">
+                 </div>
+             </div>
+--- a/src/renderer/views/pages/library-artists.ejs
++++ b/src/renderer/views/pages/library-artists.ejs
+@@ -12,7 +12,7 @@
+                     <div class="search-input-container" style="width:calc(100%-20px);margin: 16px 10px 10px 10px;">
+                         <div class="search-input--icon"></div>
+                         <input type="search" style="width:100%;" spellcheck="false"
+-                               :placeholder="$root.getLz('term.search') + '...'" @input="$root.searchLibraryArtists"
++                               :placeholder="$root.getLz('term.search') + '...'" @input="$root.searchLibraryArtists(0)"
+                                v-model="library.artists.search" class="search-input">
+                     </div>
+                 </div>

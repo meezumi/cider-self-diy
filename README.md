@@ -18,6 +18,7 @@ is one fix, in its own commit.
 |---|---|
 | `0001-sidebar-playlist-track-present-label` | "(Track present)" never appeared in Add to Playlist |
 | `0002-vueapp-trackmapping-after-add` | …and then went stale the moment you used it |
+| `0003-library-search-preserves-sort-order` | Searching your library threw away the sort order |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -29,6 +30,22 @@ you happen to be looking at. It never updates `playlists.trackMapping`, so a
 track you just added showed no label until the next full library scan or a
 restart. Now the mapping is updated in place on success. (Vue 2 can't detect
 plain property addition, so new keys go in via `$set`.)
+
+**0003** — the search boxes on Library → Albums and Library → Artists were
+bound as `@input="$root.searchLibraryAlbums"`, with no argument list. Vue hands
+a bare method reference the DOM event, so the `index` parameter arrived as an
+`InputEvent`. `sorting[index]` and `sortOrder[index]` were then `undefined`,
+both compared values collapsed to `""`, and neither the `asc` nor the `desc`
+branch matched — so the comparator returned `undefined`, which `Array.sort`
+treats as 0. Typing one character into either box silently dropped you back to
+raw library order, and it stayed that way until you touched the sort dropdown.
+Now they pass the index each page already uses elsewhere: `1` for albums, `0`
+for artists.
+
+The Songs page doesn't have this bug: `searchLibrarySongs()` takes no index and
+reads `cfg.libraryPrefs.songs` directly. It's the same function repaired — the
+albums and artists copies were left behind, comment and all ("make a copy of
+searchLibrarySongs except use Albums instead of Songs").
 
 ## What this is not
 
@@ -80,6 +97,7 @@ To go back:
 ```sh
 ./scripts/rollback.sh                            # pristine
 ./scripts/rollback.sh app.asar.v1-sidebar-only   # just 0001
+./scripts/rollback.sh app.asar.v2-trackmapping   # 0001 + 0002
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all
