@@ -20,6 +20,7 @@ is one fix, in its own commit.
 | `0002-vueapp-trackmapping-after-add` | …and then went stale the moment you used it |
 | `0003-library-search-preserves-sort-order` | Searching your library threw away the sort order |
 | `0004-playlist-description-editable` | Renaming a playlist could throw; descriptions were unreachable |
+| `0005-mark-library-confirm-button` | Add/Remove from Library's confirm step had no CSS handle |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -69,6 +70,21 @@ Also removed a duplicate `editPlaylistDescription` — the file defined it twice
 once to save and once to open the editor. The later definition silently won, so
 the saving one was dead code and the working behaviour depended on declaration
 order.
+
+**0005** — adds the class `md-btn-confirm` to the Add/Remove from Library
+confirm button. Nothing else; no behaviour change.
+
+That button is the second step of a two-step control, and it is a *separate*
+`<button>` from the resting one — same classes, same icon class, same inline
+`min-width`. The only thing that differs between the two states is the label
+text node. A theme that renders these controls icon-only (mine does, by
+collapsing the label with `font-size: 0`) therefore makes the armed state
+pixel-identical to the resting one, and the button looks dead.
+
+No stylesheet can tell them apart: `confirm` touches nothing else in the DOM,
+and Vue renders the inactive branch as a comment node, so even `:nth-child`
+sees both at the same index. A marker class is the smallest thing that makes
+the state addressable at all.
 
 ## What this is not
 
@@ -122,6 +138,7 @@ To go back:
 ./scripts/rollback.sh app.asar.v1-sidebar-only   # just 0001
 ./scripts/rollback.sh app.asar.v2-trackmapping   # 0001 + 0002
 ./scripts/rollback.sh app.asar.v3-library-sort   # 0001 + 0002 + 0003
+./scripts/rollback.sh app.asar.v4-playlist-desc  # 0001 ... 0004
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all
