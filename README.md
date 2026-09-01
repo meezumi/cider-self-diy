@@ -131,6 +131,14 @@ Then, **with Cider fully quit**:
 ./scripts/install.sh
 ```
 
+`install.sh` and `rollback.sh` are the only things here that need **`sudo`**.
+They write into `/opt/Cider/resources`, which is root-owned, so both call it
+internally and will prompt for your password. That's three
+`sudo install -m 0644 -o root -g root` lines between the two scripts, and
+they're worth reading before you run them. Everything else — installing
+dependencies, copying the base archive, patching, repacking, verifying — stays
+inside `build/` and needs no elevation.
+
 To go back:
 
 ```sh
