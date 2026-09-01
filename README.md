@@ -19,6 +19,7 @@ is one fix, in its own commit.
 | `0001-sidebar-playlist-track-present-label` | "(Track present)" never appeared in Add to Playlist |
 | `0002-vueapp-trackmapping-after-add` | …and then went stale the moment you used it |
 | `0003-library-search-preserves-sort-order` | Searching your library threw away the sort order |
+| `0004-playlist-description-editable` | Renaming a playlist could throw; descriptions were unreachable |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -46,6 +47,28 @@ The Songs page doesn't have this bug: `searchLibrarySongs()` takes no index and
 reads `cfg.libraryPrefs.songs` directly. It's the same function repaired — the
 albums and artists copies were left behind, comment and all ("make a copy of
 searchLibrarySongs except use Albums instead of Songs").
+
+**0004** — two faults in the same place. `editPlaylist()` is bound to
+blur/change/enter on the playlist *name* field, and it unconditionally read
+`data.attributes.description.standard`. `newPlaylist()` POSTs only `{ name }`,
+so every playlist created in Cider has no `description` at all and that read
+threw. The rename itself had already gone out on the line above, so the name
+changed on Apple's side while the sidebar kept the old one and the field stayed
+stuck in edit mode.
+
+The second fault is why nobody noticed the first: the description block is
+`v-if`-gated on a description already existing, so a playlist without one had no
+click target and no way to get a description in the first place. There is an
+`action.editDescription` string sitting in `translations.js`, localised into 31
+languages and referenced from nowhere — the affordance was planned and never
+wired up. It's now an entry in the playlist's "…" menu, shown only for
+`canEdit` library playlists, and the editor seeds an empty description via
+`$set` so the input has something reactive to bind to.
+
+Also removed a duplicate `editPlaylistDescription` — the file defined it twice,
+once to save and once to open the editor. The later definition silently won, so
+the saving one was dead code and the working behaviour depended on declaration
+order.
 
 ## What this is not
 
@@ -98,6 +121,7 @@ To go back:
 ./scripts/rollback.sh                            # pristine
 ./scripts/rollback.sh app.asar.v1-sidebar-only   # just 0001
 ./scripts/rollback.sh app.asar.v2-trackmapping   # 0001 + 0002
+./scripts/rollback.sh app.asar.v3-library-sort   # 0001 + 0002 + 0003
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all

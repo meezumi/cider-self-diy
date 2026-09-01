@@ -1,0 +1,114 @@
+--- a/src/renderer/views/pages/cider-playlist.ejs
++++ b/src/renderer/views/pages/cider-playlist.ejs
+@@ -63,14 +63,14 @@
+                                     </template>
+                                     <div class="playlist-desc"
+                                          :style="{ 'color': '#' +hasHeroObject()?.textColor3 ?? '' }"
+-                                         v-if="(data.attributes.description && (data.attributes.description.standard || data.attributes.description.short)) || (data.attributes.editorialNotes && (data.attributes.editorialNotes.standard || data.attributes.editorialNotes.short))">
++                                         v-if="descriptionEditing || (data.attributes.description && (data.attributes.description.standard || data.attributes.description.short)) || (data.attributes.editorialNotes && (data.attributes.editorialNotes.standard || data.attributes.editorialNotes.short))">
+                                         <div v-if="(data.attributes.description?.short ?? data.attributes.editorialNotes?.short) != null"
+                                              class="content"
+                                              v-html="data.attributes.description?.short ?? data.attributes.editorialNotes?.short"
+                                              @click="openInfoModal()"></div>
+                                         <div v-else-if="((data.attributes.description?.standard ?? data.attributes.editorialNotes?.standard) != null) && (descriptionEditing == false)"
+                                              @mouseover="minClass(false)" @click="editPlaylistDescription()"
+-                                             v-html="(data.attributes.description?.standard ?? (data.attributes.editorialNotes?.standard ?? '')).substring(0, 255) +'...'"
++                                             v-html="descriptionPreview()"
+                                         ></div>
+                                         <div v-else-if="((data.attributes.description?.standard ?? data.attributes.editorialNotes?.standard) != null) && (descriptionEditing)"
+                                              @mouseover="minClass(false)"><input type="text"
+@@ -580,26 +580,28 @@
+         }
+       },
+       editPlaylist() {
++        // Bound to blur/change/enter on the name field as well as the
++        // description one. A playlist created in Cider has no description at
++        // all -- newPlaylist() POSTs only { name } -- so reading .standard off
++        // it threw here, and the three statements below never ran: the rename
++        // reached Apple but was never mirrored into the sidebar listing, and
++        // the field stayed stuck in edit mode.
++        const description = this.data.attributes.description?.standard
+         this.app.editPlaylist(this.data.id, this.data.attributes.name);
+-        this.app.editPlaylistDescription(this.data.id, this.data.attributes.description.standard);
++        if (description != null) {
++          this.app.editPlaylistDescription(this.data.id, description);
++        }
+         this.app.playlists.listing.forEach(playlist => {
+           if (playlist.id === this.data.id) {
+             playlist.attributes.name = this.data.attributes.name
+-            playlist.attributes.description = this.data.attributes.description.standard
++            if (description != null) {
++              playlist.attributes.description = description
++            }
+           }
+         })
+         this.nameEditing = false
+         this.descriptionEditing = false
+       },
+-      editPlaylistDescription() {
+-        this.app.editPlaylistDescription(this.data.id, this.data.attributes.description.standard);
+-        this.app.playlists.listing.forEach(playlist => {
+-          if (playlist.id === this.data.id) {
+-            playlist.attributes.description = this.data.attributes.description.standard
+-          }
+-        })
+-        this.descriptionEditing = false
+-      },
+       addToLibrary(id) {
+         app.mk.addToLibrary(id)
+         this.inLibrary = true
+@@ -633,12 +635,25 @@
+       },
+       editPlaylistDescription() {
+         if (this.data.attributes.canEdit && this.data.type === "library-playlists") {
++          if (this.data.attributes.description?.standard == null) {
++            // The input below binds straight to description.standard, so the
++            // object has to exist before edit mode opens. Vue 2 cannot detect
++            // a plain property addition, hence $set.
++            this.$set(this.data.attributes, "description", {
++              ...(this.data.attributes.description ?? {}),
++              standard: ""
++            })
++          }
+           this.descriptionEditing = true
+           setTimeout(() => {
+-            document.querySelector(".descriptionEdit").focus()
++            document.querySelector(".descriptionEdit")?.focus()
+           }, 100)
+         }
+       },
++      descriptionPreview() {
++        const text = this.data.attributes.description?.standard ?? (this.data.attributes.editorialNotes?.standard ?? '')
++        return text.length > 255 ? text.substring(0, 255) + '...' : text
++      },
+       buildContextMenu(index) {
+         let self = this
+         if (!this.data.attributes.canEdit) {
+@@ -779,6 +794,13 @@
+                 app.promptAddToPlaylist()
+               }
+             },
++            "editDescription": {
++              name: app.getLz('action.editDescription'),
++              icon: "./assets/feather/pen-tool.svg",
++              action: () => {
++                this.editPlaylistDescription()
++              }
++            },
+             "share": {
+               name: app.getLz('term.share'),
+               icon: "./assets/feather/share.svg",
+@@ -809,6 +831,13 @@
+             }
+           }
+         }
++        // Only your own library playlists can be edited. Without this the
++        // description block has no entry point at all when a playlist has no
++        // description yet, which is every playlist Cider itself creates.
++        if (!(this.data.attributes.canEdit && this.data.type === "library-playlists")) {
++          delete menuItems.items.editDescription
++        }
++
+         app.showMenuPanel(menuItems, event)
+ 
+         try {
