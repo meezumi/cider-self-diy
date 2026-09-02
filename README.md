@@ -21,6 +21,7 @@ is one fix, in its own commit.
 | `0003-library-search-preserves-sort-order` | Searching your library threw away the sort order |
 | `0004-playlist-description-editable` | Renaming a playlist could throw; descriptions were unreachable |
 | `0005-mark-library-confirm-button` | Add/Remove from Library's confirm step had no CSS handle |
+| `0006-unplayable-items-open-in-browser` | Radio shows and interviews were badged unplayable, then did nothing when clicked |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -86,6 +87,36 @@ and Vue renders the inactive branch as a comment node, so even `:nth-child`
 sees both at the same index. A marker class is the smallest thing that makes
 the state addressable at all.
 
+**0006** — whole rows of the home page ("Artists Take Over", "Listen to
+Interviews", the radio shows carousel) rendered every card under a grey
+slash-circle badge, and clicking one did nothing at all.
+
+The badge is real and it was telling the truth: `mediaitem-square` marks an
+item unavailable when `playParams.kind` is a `radioStation` with
+`streamingKind == 1`, or when a video item arrives with no `playParams`.
+Neither can be queued. The problem was that the badge was the *only* thing that
+knew. `routeView` never asked, so a badged card still fell through to
+`playMediaItemById`, which called `setQueue` with a key MusicKit does not
+accept — failing silently. The card looked like a dead pixel.
+
+The check itself had three faults. `typeof null` is `"object"`, so a null
+`playParams` entered the radio branch and threw on `null.kind` — inside an
+`async mounted()`, where it surfaced only as an unhandled rejection. The video
+branch tested `tv-episodes`, but the home feed requests `tv-shows` and never
+`tv-episodes`, so on the home page that half matched nothing. And
+`streamingKind` appeared in exactly one place in the entire codebase: this
+check. It gated nothing.
+
+Both callers now share one `isUnplayableItem()` helper, so the badge and the
+click can't drift apart, and an unplayable item opens in your browser — which
+can play it — instead of failing quietly. `window.open` is already how
+`routeView` hands off editorial links. Items with no URL fall through to the
+old path rather than dead-ending. The badge stays, now with a "Show in Apple
+Music" tooltip reusing the existing localised string.
+
+The invariant worth knowing: **anything showing the badge today is what this
+patch redirects.** Nothing else changes.
+
 ## What this is not
 
 Not a fork, not a redistribution, not a thing you should install because a
@@ -147,6 +178,7 @@ To go back:
 ./scripts/rollback.sh app.asar.v2-trackmapping   # 0001 + 0002
 ./scripts/rollback.sh app.asar.v3-library-sort   # 0001 + 0002 + 0003
 ./scripts/rollback.sh app.asar.v4-playlist-desc  # 0001 ... 0004
+./scripts/rollback.sh app.asar.v5-confirm-class  # 0001 ... 0005
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all

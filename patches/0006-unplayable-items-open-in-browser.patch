@@ -1,0 +1,74 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -2238,7 +2238,40 @@
+         });
+       } catch (e) {}
+     },
++    // Apple's feeds return a lot of content Cider has no player for: radio
++    // shows and interviews (playParams.kind radioStation, streamingKind 1),
++    // and video items that arrive with no playParams at all.
++    //
++    // mediaitem-square already worked this out in order to draw its
++    // slash-circle badge, but routeView never asked. So a badged card still
++    // fell through to a setQueue that could not succeed, and clicking it did
++    // nothing whatsoever -- three rows of the home page behaved like dead
++    // pixels. One helper now answers for both, so what is badged and what is
++    // redirected can no longer drift apart.
++    isUnplayableItem(item) {
++      const playParams = item?.attributes?.playParams;
++      // typeof null is "object", so null has to be excluded by hand or the
++      // kind lookup below throws -- which it did, inside an async mounted(),
++      // where it surfaced only as an unhandled rejection.
++      if (playParams != null && typeof playParams === "object") {
++        return `${playParams.kind ?? ""}`.includes("radioStation") && playParams.streamingKind == 1;
++      }
++      // The home feed asks for tv-shows; tv-episodes only appears in search
++      // and browse. The old check tested tv-episodes alone, so on the home
++      // page that half never matched anything.
++      return ["music-movies", "tv-episodes", "tv-shows"].includes(item?.type ?? "");
++    },
+     routeView(item) {
++      if (this.isUnplayableItem(item)) {
++        const url = item?.attributes?.url ?? "";
++        if (url) {
++          // The web player can play these, and window.open is already how
++          // this method hands off editorial links.
++          window.open(url);
++          return;
++        }
++        // Nothing to hand over -- fall through rather than dead-end.
++      }
+       this.setPagePos();
+       let kind = item.attributes?.playParams ? item.attributes?.playParams?.kind ?? item.type ?? "" : item.type ?? "";
+       let id = item.attributes?.playParams ? item.attributes?.playParams?.id ?? item.id ?? "" : item.id ?? "";
+--- a/src/renderer/views/components/mediaitem-square.ejs
++++ b/src/renderer/views/components/mediaitem-square.ejs
+@@ -12,7 +12,8 @@
+                   <div class="unavailable-overlay" v-if="unavailable">
+                       <div class="codicon codicon-circle-slash"></div>
+                   </div>
+-                  <div class="artwork" @click='app.routeView(item)'>
++                  <div class="artwork" @click='app.routeView(item)'
++                       :title="unavailable ? app.getLz('action.showInAppleMusic') : null">
+                       <mediaitem-artwork
+                               :url="getArtworkUrl()"
+                               :video="(item.attributes != null && item.attributes.editorialVideo != null) ? (item.attributes.editorialVideo.motionDetailSquare ? item.attributes.editorialVideo.motionDetailSquare.video : (item.attributes.editorialVideo.motionSquareVideo1x1 ? item.attributes.editorialVideo.motionSquareVideo1x1.video : '')) : '' "
+@@ -120,15 +121,9 @@
+   },
+   async mounted() {
+     await this.getBadges()
+-    if (typeof this.item.attributes.playParams == "object") {
+-      if (this.item.attributes.playParams.kind.includes("radioStation") && (this.item.attributes.playParams.streamingKind == 1)) {
+-        this.unavailable = true
+-      }
+-    } else {
+-      if (this.item.type == "music-movies" || this.item.type == "tv-episodes") {
+-        this.unavailable = true
+-      }
+-    }
++    // Same question routeView asks before deciding to hand the item to the
++    // browser, so the badge and the click can never disagree.
++    this.unavailable = this.$root.isUnplayableItem(this.item)
+   },
+   methods: {
+     getBgColor() {
