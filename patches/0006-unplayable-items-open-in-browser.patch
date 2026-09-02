@@ -1,6 +1,6 @@
 --- a/src/renderer/main/vueapp.js
 +++ b/src/renderer/main/vueapp.js
-@@ -2238,7 +2238,40 @@
+@@ -2238,7 +2238,47 @@
          });
        } catch (e) {}
      },
@@ -31,9 +31,16 @@
 +      if (this.isUnplayableItem(item)) {
 +        const url = item?.attributes?.url ?? "";
 +        if (url) {
-+          // The web player can play these, and window.open is already how
-+          // this method hands off editorial links.
-+          window.open(url);
++          // Deliberately not window.open: the main process runs every
++          // window.open through setWindowOpenHandler, which returns action
++          // "allow" for any URL containing apple.com. An Apple Music link
++          // therefore opened as an in-app Electron window, which renders blank
++          // because it cannot play anything either.
++          //
++          // shell is not an option here either -- this renderer is sandboxed,
++          // and a sandboxed require("electron") does not expose it. So the
++          // main process is asked to do it, where shell does exist.
++          ipcRenderer.send("open-external", url);
 +          return;
 +        }
 +        // Nothing to hand over -- fall through rather than dead-end.
@@ -72,3 +79,41 @@
    },
    methods: {
      getBgColor() {
+--- a/build/base/browserwindow.js
++++ b/build/base/browserwindow.js
+@@ -1343,6 +1343,16 @@
+             });
+             return u.filePaths;
+         }));
++        // The renderer runs with sandbox: true, where require("electron") does
++        // not expose shell -- so opening a link in the user's real browser has
++        // to be asked for over IPC. Scheme is checked here because
++        // openExternal hands the string to the OS.
++        electron_1.ipcMain.on("open-external", (_event, url) => {
++            const target = String(url || "");
++            if (target.startsWith("https://") || target.startsWith("http://")) {
++                electron_1.shell.openExternal(target).catch(console.error);
++            }
++        });
+         //#region Cider Connect
+         electron_1.ipcMain.on("cc-auth", (_event) => {
+             electron_1.shell.openExternal(String(utils_1.utils.getStoreValue("cc_authURL")));
+--- a/src/main/base/browserwindow.ts
++++ b/src/main/base/browserwindow.ts
+@@ -1403,6 +1403,16 @@
+       return u.filePaths;
+     });
+ 
++    // The renderer runs with sandbox: true, where require("electron") does
++    // not expose shell -- so opening a link in the user's real browser has to
++    // be asked for over IPC. Scheme is checked here because openExternal hands
++    // the string to the OS.
++    ipcMain.on("open-external", (_event, url) => {
++      const target = String(url || "");
++      if (target.startsWith("https://") || target.startsWith("http://")) {
++        shell.openExternal(target).catch(console.error);
++      }
++    });
+     //#region Cider Connect
+     ipcMain.on("cc-auth", (_event) => {
+       shell.openExternal(String(utils.getStoreValue("cc_authURL")));

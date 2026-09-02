@@ -109,10 +109,37 @@ check. It gated nothing.
 
 Both callers now share one `isUnplayableItem()` helper, so the badge and the
 click can't drift apart, and an unplayable item opens in your browser — which
-can play it — instead of failing quietly. `window.open` is already how
-`routeView` hands off editorial links. Items with no URL fall through to the
-old path rather than dead-ending. The badge stays, now with a "Show in Apple
-Music" tooltip reusing the existing localised string.
+can play it — instead of failing quietly. Items with no URL fall through to
+the old path rather than dead-ending. The badge stays, now with a "Show in
+Apple Music" tooltip reusing the existing localised string.
+
+Getting it into the *real* browser takes two more steps than it looks, and
+both are easy to get wrong.
+
+`window.open` is not enough. The main process installs a
+`setWindowOpenHandler` that returns `action: "allow"` for any URL containing
+`apple.com`, so an Apple Music link opens as an in-app Electron window — which
+renders blank, because it can't play anything either. Every *other* URL there
+goes to `shell.openExternal`, so the mechanism exists; Apple links are exactly
+the case routed away from it. That rule is deliberately not narrowed here —
+Apple's own sign-in flow depends on it.
+
+Calling `shell.openExternal` from the renderer doesn't work either. The window
+is created with `sandbox: true`, and a sandboxed `require("electron")` exposes
+only a small subset — `ipcRenderer`, `contextBridge`, `webFrame` and friends.
+`shell` is not among them, so it is silently `undefined` and the call throws.
+
+So the renderer asks the main process, where `shell` does exist, over a
+dedicated `open-external` channel. The handler checks the scheme before handing
+the string to the OS. Because it touches the main process, this patch edits the
+*compiled* `build/base/browserwindow.js` — that is what Electron actually runs
+(`"main": "./build/index.js"`) — and mirrors the change into the `.ts` beside
+it, so the shipped source doesn't contradict the shipped build.
+
+`openExternal` respects your system default browser rather than hardcoding one.
+
+(The pre-existing `window.open` for editorial links in `routeView` has the same
+blind spot, but it's untouched here — one change at a time.)
 
 The invariant worth knowing: **anything showing the badge today is what this
 patch redirects.** Nothing else changes.
