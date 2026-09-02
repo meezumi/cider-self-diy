@@ -1,0 +1,83 @@
+--- a/src/renderer/views/components/sidebar-playlist.ejs
++++ b/src/renderer/views/components/sidebar-playlist.ejs
+@@ -9,7 +9,9 @@
+                 :href="item.href"
+                 @click='clickEvent()'>
+             <template v-if="!renaming">
+-                <svg-icon :url="icon" name="sidebar-playlist" />
++                <img v-if="artworkUrl" class="sidebar-playlist-artwork" :src="artworkUrl"
++                     @error="artworkFailed = true" decoding="async" loading="lazy" alt="">
++                <svg-icon v-else :url="icon" name="sidebar-playlist" />
+                 {{ item.attributes.name }}
+                 <small class="presentNotice" v-if="hasRelatedMediaItems">(Track present)</small>
+             </template>
+@@ -54,7 +56,10 @@
+         children: [],
+         playlistRoot: "p.playlistsroot",
+         renaming: false,
+-        icon: ""
++        icon: "",
++        // Library artwork URLs are presigned and expire. If one 404s we fall
++        // back to the icon rather than showing a broken image.
++        artworkFailed: false
+       }
+     },
+     async mounted() {
+@@ -65,6 +70,22 @@
+       }
+     },
+     computed: {
++      // The listing this sidebar renders already carries artwork -- the same
++      // object the playlist page uses for its header image -- it was simply
++      // never drawn here, so every playlist showed an identical list glyph.
++      // Folders have no artwork and keep theirs.
++      artworkUrl() {
++        if (this.artworkFailed || this.item.type === "library-playlist-folders") {
++          return ""
++        }
++        const url = this.item?.attributes?.artwork?.url
++        if (!url) {
++          return ""
++        }
++        // Handles the {w}/{h} templating catalog playlists use, and applies
++        // devicePixelRatio itself, so it gets the icon size, not a pixel count.
++        return this.$root.getMediaItemArtwork(url, 18)
++      },
+       // Was a one-shot lookup in mounted(). Vue mounts children before parents,
+       // so relateMediaItems was still the empty default every time and this
+       // never became true. As a computed it re-evaluates when the prop lands.
+--- a/src/renderer/style.css
++++ b/src/renderer/style.css
+@@ -15571,6 +15571,13 @@
+   --size: var(--iconSize);
+   flex-shrink: 0;
+ }
++.app-sidebar-item > .sidebar-playlist-artwork {
++  width: var(--iconSize);
++  height: var(--iconSize);
++  flex-shrink: 0;
++  border-radius: 3px;
++  object-fit: cover;
++}
+ .app-sidebar-item:hover {
+   border: 1px solid rgba(200, 200, 200, 0);
+   background: rgba(180, 180, 180, 0.15);
+--- a/src/renderer/style.less
++++ b/src/renderer/style.less
+@@ -921,6 +921,16 @@
+     --size: var(--iconSize);
+     flex-shrink: 0;
+   }
++
++  // Playlist rows draw their own artwork instead of the shared glyph; match
++  // the icon box exactly so row height and the 12px gap are unchanged.
++  > .sidebar-playlist-artwork {
++    width: var(--iconSize);
++    height: var(--iconSize);
++    flex-shrink: 0;
++    border-radius: 3px;
++    object-fit: cover;
++  }
+ }
+ 
+ .app-sidebar-item:hover {

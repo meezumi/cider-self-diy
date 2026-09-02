@@ -22,6 +22,7 @@ is one fix, in its own commit.
 | `0004-playlist-description-editable` | Renaming a playlist could throw; descriptions were unreachable |
 | `0005-mark-library-confirm-button` | Add/Remove from Library's confirm step had no CSS handle |
 | `0006-unplayable-items-open-in-browser` | Radio shows and interviews were badged unplayable, then did nothing when clicked |
+| `0007-sidebar-playlist-artwork` | Every sidebar playlist showed the same list glyph instead of its own cover |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -144,6 +145,29 @@ blind spot, but it's untouched here — one change at a time.)
 The invariant worth knowing: **anything showing the badge today is what this
 patch redirects.** Nothing else changes.
 
+**0007** — the playlist sidebar drew the same `feather/list.svg` glyph beside
+every entry, so twenty-six playlists looked identical. The cover you set is
+visible only once you open the playlist.
+
+Nothing needed fetching. `app.playlists.listing` — the array the sidebar is
+already iterating — carries `attributes.artwork` on every entry; it is the same
+object the playlist page uses for its header image. The component just never
+drew it, because `icon` was assigned a constant in `mounted()`.
+
+Artwork now comes from a computed that runs the URL through
+`getMediaItemArtwork()`, which handles the `{w}`/`{h}` templating catalog
+playlists use and applies `devicePixelRatio` itself. Folders have no artwork
+and keep their folder icon.
+
+Library artwork URLs are presigned and expire, so a stale one can 404. An
+`@error` handler falls back to the original glyph rather than leaving a broken
+image in the sidebar.
+
+The stylesheet is the compiled `style.css` — that is what the app loads — with
+the same rule mirrored into `style.less` beside it. The sizing deliberately
+reuses `--iconSize`, the variable the glyph already used, so row height and the
+12px gap are untouched.
+
 ## What this is not
 
 Not a fork, not a redistribution, not a thing you should install because a
@@ -206,6 +230,7 @@ To go back:
 ./scripts/rollback.sh app.asar.v3-library-sort   # 0001 + 0002 + 0003
 ./scripts/rollback.sh app.asar.v4-playlist-desc  # 0001 ... 0004
 ./scripts/rollback.sh app.asar.v5-confirm-class  # 0001 ... 0005
+./scripts/rollback.sh app.asar.v6-open-external  # 0001 ... 0006
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all
