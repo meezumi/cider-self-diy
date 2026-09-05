@@ -23,6 +23,7 @@ is one fix, in its own commit.
 | `0005-mark-library-confirm-button` | Add/Remove from Library's confirm step had no CSS handle |
 | `0006-unplayable-items-open-in-browser` | Radio shows and interviews were badged unplayable, then did nothing when clicked |
 | `0007-sidebar-playlist-artwork` | Every sidebar playlist showed the same list glyph instead of its own cover |
+| `0008-real-bugs-batch` | Four unrelated defects: a search box that filtered nothing, an unbounded recursion, a lyrics chain that dead-ended, and a rename that fired twice |
 
 **0001** — the label was set once in `mounted()`. Vue 2 mounts children before
 parents, so the `relateMediaItems` prop was still its empty default every time
@@ -168,6 +169,51 @@ the same rule mirrored into `style.less` beside it. The sizing deliberately
 reuses `--iconSize`, the variable the glyph already used, so row height and the
 12px gap are untouched.
 
+**0008** — four unrelated defects, batched because they are all small and all
+sit in files earlier patches already touch.
+
+*The Add to Playlist search box filtered nothing.* `search()` populates
+`playlistSorted` and has always done so, but the template iterates
+`$root.getPlaylistFolderChildren('p.playlistsroot')` — so typing filtered an
+array nothing rendered. A `displayedPlaylists` computed now returns the folder
+listing when the query is empty (the previous behaviour, folders and all) and
+the flat filtered list while searching. That also makes the existing
+Enter-to-add shortcut reachable, since it keys off the same `playlistSorted`.
+
+*`playMediaItemById` could recurse until the stack overflowed.* Its `catch`
+called itself with identical arguments. Every async path in that method
+resolves inside `.then()`, so the only way into the `catch` is a synchronous
+throw — which an immediate, identical retry reproduces exactly. Nothing changes
+between attempts, so the retry could never have succeeded; it now logs and
+stops.
+
+*The lyrics chain dead-ended instead of falling back to Apple Music.* With
+`enable_mxm` on, `loadLyrics()` tries Musixmatch **first** — despite the comment
+directly above it saying MXM is the fallback — and every Musixmatch failure path
+hands off to QQ, whose first line is a config guard that returns immediately
+when it is disabled. `enable_mxm: true` with `enable_qq: false`, a pairing the
+settings UI offers freely, therefore produced no lyrics at all. Apple Music was
+never tried, though `app.loadAMLyrics()` sat commented out beside each of those
+sites. A `lyricsFallback()` helper now routes to QQ when it is enabled and to
+Apple Music otherwise. It terminates: `loadAMLyrics`' own catch routes onward to
+QQ (guarded) or MXM.
+
+The symptom is worth recording, because it does not look like a lyrics problem.
+`chrome-top.ejs` renders the lyrics button from `lyrics.length > 0`; the `v-else`
+branch draws the same button at `opacity: 0.3` with `pointer-events: none`. So
+the button appears present, swallows every click, and explains nothing.
+
+*Renaming a playlist fired twice.* `rename()` is bound to both
+`@keydown.enter` and `@blur`. Enter sets `renaming` false, which swaps the input
+out via `v-else` and fires blur, which calls `rename()` again — two edit
+requests per rename. Both bindings are wanted; a guard on `renaming` drops the
+second entry.
+
+One further one-liner: `sidebar-playlist.ejs` called `this.addFavorite(...)`,
+which is defined on the root instance, not the component. It is unreachable —
+the menu entry is `disabled: true, hidden: true` — so this fixes a latent throw,
+nothing visible.
+
 ## What this is not
 
 Not a fork, not a redistribution, not a thing you should install because a
@@ -231,6 +277,7 @@ To go back:
 ./scripts/rollback.sh app.asar.v4-playlist-desc  # 0001 ... 0004
 ./scripts/rollback.sh app.asar.v5-confirm-class  # 0001 ... 0005
 ./scripts/rollback.sh app.asar.v6-open-external  # 0001 ... 0006
+./scripts/rollback.sh app.asar.v7-sidebar-artwork # 0001 ... 0007
 ```
 
 `install.sh` refuses to run while Cider is alive, and refuses to install at all

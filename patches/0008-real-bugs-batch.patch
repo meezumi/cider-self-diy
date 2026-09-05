@@ -1,0 +1,117 @@
+--- a/src/renderer/views/components/add-to-playlist.ejs
++++ b/src/renderer/views/components/add-to-playlist.ejs
+@@ -13,7 +13,7 @@
+                     <div class="name">{{app.getLz('action.createPlaylist')}}</div>
+                 </button>
+                 <sidebar-playlist :playlist-select="playlistSelect" :relate-media-items="relateItems"
+-                                  v-for="item in $root.getPlaylistFolderChildren('p.playlistsroot')" v-bind:key="item.id" :item="item">
++                                  v-for="item in displayedPlaylists" v-bind:key="item.id" :item="item">
+                 </sidebar-playlist>
+             </div>
+             <div class="modal-search">
+@@ -63,6 +63,21 @@
+         }
+       })
+     },
++    computed: {
++      // search() has always populated playlistSorted; nothing ever read
++      // it, so typing in the box filtered an array the template did not
++      // render. With no query keep the previous behaviour exactly -- the
++      // root folder listing, which sidebar-playlist expands on its own --
++      // and switch to the flat filtered list only while searching. That
++      // also makes the existing Enter-to-add shortcut reachable, since
++      // it keys off the same playlistSorted.
++      displayedPlaylists() {
++        if (this.searchQuery === "") {
++          return this.$root.getPlaylistFolderChildren('p.playlistsroot')
++        }
++        return this.playlistSorted
++      }
++    },
+     methods: {
+       playlistSelect(playlist) {
+         if (playlist.type != "library-playlist-folders") {
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -3402,6 +3402,22 @@
+     showSearch() {
+       this.page = "search";
+     },
++    // Musixmatch's failure paths all handed off to QQ, whose first line
++    // is a config guard that returns immediately when it is disabled.
++    // With enable_mxm on and enable_qq off -- a pairing the settings UI
++    // offers freely -- the whole chain dead-ended: lyrics stayed empty,
++    // and the chrome button renders its v-else branch at pointer-events:
++    // none, so it looked present but swallowed clicks with nothing
++    // explaining why. Apple Music was never tried at all, even though
++    // the calls to it sat commented out beside each of these sites.
++    // Terminates: loadAMLyrics' own catch routes to QQ (guarded) or MXM.
++    lyricsFallback() {
++      if (app.cfg.lyrics.enable_qq) {
++        this.loadQQLyrics();
++      } else {
++        this.loadAMLyrics();
++      }
++    },
+     loadLyrics() {
+       const musicType = MusicKit.getInstance().nowPlayingItem != null ? MusicKit.getInstance().nowPlayingItem["type"] ?? "" : "";
+       // console.log("mt", musicType)
+@@ -3576,14 +3592,12 @@
+               }
+             } catch (e) {
+               console.log("error");
+-              app.loadQQLyrics();
+-              //app.loadAMLyrics();
++              app.lyricsFallback();
+             }
+           };
+           req.onerror = function () {
+             console.log("error");
+-            app.loadQQLyrics();
+-            // app.loadAMLyrics();
++            app.lyricsFallback();
+           };
+           req.send();
+         }
+@@ -4017,8 +4031,13 @@
+             });
+         }
+       } catch (err) {
+-        console.log(err);
+-        this.playMediaItemById(id, kind, isLibrary, raurl);
++        // Was an unguarded self-call with identical arguments. Every
++        // async path here resolves inside .then(), so the only way into
++        // this catch is a synchronous throw -- which an immediate,
++        // identical retry reproduces exactly, recursing until the stack
++        // overflows. No state changes between attempts, so the retry
++        // could never have succeeded. Log and stop.
++        console.error("playMediaItemById failed", err);
+       }
+     },
+     queueParentandplayChild(parent, childIndex, item) {
+--- a/src/renderer/views/components/sidebar-playlist.ejs
++++ b/src/renderer/views/components/sidebar-playlist.ejs
+@@ -114,6 +114,14 @@
+         }
+       },
+       rename() {
++        // Bound to both @keydown.enter and @blur. Enter sets renaming
++        // false, which swaps the input out via v-else and fires blur --
++        // so the handler ran twice and sent two edit requests for one
++        // rename. Both bindings are wanted (Enter to commit, blur to
++        // commit on click-away); the second entry is not.
++        if (!this.renaming) {
++          return
++        }
+         this.renaming = false
+ 
+         if (this.item.type === "library-playlist-folders") {
+@@ -201,7 +209,7 @@
+               disabled: true,
+               hidden: true,
+               action: () => {
+-                this.addFavorite(playlist_id, "library-playlists")
++                this.$root.addFavorite(playlist_id, "library-playlists")
+               }
+             }
+           }
