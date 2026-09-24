@@ -1,0 +1,86 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -3,6 +3,15 @@
+ Vue.use(VueHorizontal);
+ Vue.use(VueObserveVisibility);
+ Vue.use(BootstrapVue);
++// Library membership this session has already established, keyed by the id
++// the now-playing menu adds with: { inLibrary, at, local }. The menu is drawn
++// before its catalog lookup returns, so without this it opens as "Add to
++// Library" even for a song added a moment ago. See rememberLibraryState().
++const knownLibraryState = new Map();
++// A catalog lookup can lag behind an add or remove made here, so for this long
++// after a local change the lookup does not get to overwrite it.
++const LOCAL_LIBRARY_STATE_MS = 30000;
++
+ /* @namespace */
+ const app = new Vue({
+   store: store,
+@@ -3480,11 +3489,23 @@
+         }
+       }
+     },
++    rememberLibraryState(id, inLibrary, local) {
++      const key = String(id ?? "");
++      if (!key) {
++        return;
++      }
++      const prev = knownLibraryState.get(key);
++      if (!local && prev?.local && Date.now() - prev.at < LOCAL_LIBRARY_STATE_MS) {
++        return;
++      }
++      knownLibraryState.set(key, { inLibrary: !!inLibrary, at: Date.now(), local: local });
++    },
+     addToLibrary(id) {
+       let self = this;
+       this.mk.addToLibrary(id).then(
+         (data) => {
+           notyf.success(app.getLz("action.addToLibrary.success"));
++          app.rememberLibraryState(id, true, true);
+           self.getLibrarySongsFull(true);
+         },
+         (err) => {
+@@ -3509,6 +3530,7 @@
+         .then(
+           (data) => {
+             notyf.success(app.getLz("action.removeFromLibrary.success"));
++            app.rememberLibraryState(id, false, true);
+             self.getLibrarySongsFull(true);
+           },
+           (err) => {
+@@ -5055,6 +5077,18 @@
+         menus.normal.items.find((x) => x.id == "showInMusic").hidden = false;
+       }
+ 
++      const setLibraryItems = (inLibrary) => {
++        const add = menus.normal.items.find((x) => x.id == "addToLibrary");
++        const remove = menus.normal.items.find((x) => x.id == "removeFromLibrary");
++        add.hidden = inLibrary;
++        add.disabled = inLibrary;
++        remove.hidden = !inLibrary;
++      };
++      // Same id the addToLibrary entry above adds with.
++      const libraryKey = String(app.mk.nowPlayingItem.id);
++      if (knownLibraryState.has(libraryKey)) {
++        setLibraryItems(knownLibraryState.get(libraryKey).inLibrary);
++      }
+       this.showMenuPanel(menus[useMenu], event);
+ 
+       try {
+@@ -5067,12 +5101,10 @@
+           nowPlayingItem.id = app.mk.nowPlayingItem.id;
+         }
+         let result = await this.inLibrary([nowPlayingItem]);
+-        if (result[0].attributes.inLibrary) {
+-          menus.normal.items.find((x) => x.id == "addToLibrary").hidden = true;
+-          menus.normal.items.find((x) => x.id == "removeFromLibrary").hidden = false;
+-        } else {
+-          menus.normal.items.find((x) => x.id == "addToLibrary").disabled = false;
+-        }
++        // Still checked every time, so a change made on another device is
++        // picked up; a recent change made here takes precedence over it.
++        this.rememberLibraryState(libraryKey, result[0].attributes.inLibrary, false);
++        setLibraryItems(knownLibraryState.get(libraryKey).inLibrary);
+       } catch (e) {
+         e = null;
+       }
