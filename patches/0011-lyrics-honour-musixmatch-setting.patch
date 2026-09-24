@@ -1,0 +1,86 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -3475,20 +3475,23 @@
+           this.lyricsMediaItem = response.data?.data[0]?.attributes["ttml"];
+           this.parseTTML();
+         } catch (_) {
+-          if (app.cfg.lyrics.enable_mxm) {
+-            this.loadQQLyrics();
+-          } else {
+-            this.loadMXM();
+-          }
++          this.lyricsAfterAM();
+         }
+       } else {
+-        if (app.cfg.lyrics.enable_mxm) {
+-          this.loadQQLyrics(); // since mxm is already prioritized, we can just load qq lyrics if am fails
+-        } else {
+-          this.loadMXM();
+-        }
++        this.lyricsAfterAM();
+       }
+     },
++    // Where to go when Apple Music has no lyrics. With Musixmatch enabled it
++    // ran first and has already been tried; with it disabled it must not run
++    // at all. Both used to be ignored in the disabled case, which called
++    // loadMXM() anyway -- so turning Musixmatch off only stopped it running
++    // FIRST, and every song without Apple lyrics got Musixmatch's decoy text.
++    // It also made a loop: loadMXM's failure path calls lyricsFallback(),
++    // which comes back here. Only QQ (guarded, and it goes nowhere else) is
++    // left, so the chain now always ends.
++    lyricsAfterAM() {
++      this.loadQQLyrics();
++    },
+     rememberLibraryState(id, inLibrary, local) {
+       const key = String(id ?? "");
+       if (!key) {
+@@ -3613,11 +3616,19 @@
+           .slice(2, 10);
+       }
+ 
++      // Where getToken goes when it cannot get a usable token. Lyrics (mode 1)
++      // move on to the next source; a failed translation (mode 2) leaves the
++      // lyrics already on screen alone rather than reloading them.
++      function tokenFailed(mode) {
++        if (mode == 1) {
++          app.lyricsFallback();
++        }
++      }
++
+       /* get token */
+       function getToken(mode, track, artist, songid, lang, time, id) {
+         if (attempt > 2) {
+-          app.loadNeteaseLyrics();
+-          // app.loadAMLyrics();
++          tokenFailed(mode);
+         } else {
+           attempt = attempt + 1;
+           let url = "https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0&t=" + revisedRandId();
+@@ -3631,7 +3642,11 @@
+               let status2 = jsonResponse["message"]["header"]["status_code"];
+               if (status2 == 200) {
+                 let token = jsonResponse["message"]["body"]["user_token"] ?? "";
+-                if (token != "" && token != "UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly") {
++                // Musixmatch refuses by answering 200 with a placeholder token
++                // -- once "UpgradeOnly..." repeated, now 56 zeros -- and then
++                // answers every query made with it with fabricated lyrics and
++                // a wrong track. Treat any single-character run as a refusal.
++                if (token != "" && token != "UpgradeOnlyUpgradeOnlyUpgradeOnlyUpgradeOnly" && !/^(.)\1*$/.test(token)) {
+                   console.debug("200 token", mode);
+                   // token good
+                   app.mxmtoken = token;
+@@ -3651,12 +3666,12 @@
+               }
+             } catch (e) {
+               console.log("error");
+-              app.lyricsFallback();
++              tokenFailed(mode);
+             }
+           };
+           req.onerror = function () {
+             console.log("error");
+-            app.lyricsFallback();
++            tokenFailed(mode);
+           };
+           req.send();
+         }
