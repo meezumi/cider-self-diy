@@ -1,0 +1,148 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -762,12 +762,37 @@
+             },
+           },
+         )
+-        .then(() => {
+-          app.recordPlaylistTrackMapping(pid, pitems);
+-          if (app.page === "playlist_" + pid) {
+-            app.getPlaylistFromID(app.showingPlaylist.id, true);
+-          }
+-        });
++        .then(
++          () => {
++            app.notifyAddedToPlaylist(pid, pitems);
++            app.recordPlaylistTrackMapping(pid, pitems);
++            if (app.page === "playlist_" + pid) {
++              app.getPlaylistFromID(app.showingPlaylist.id, true);
++            }
++          },
++          // Second argument rather than .catch(), so a throw in the success
++          // handler above is not reported as a failed add.
++          (err) => {
++            console.error("addToPlaylist failed", err);
++            notyf.error(app.getLz("term.requestError"));
++          },
++        );
++    },
++    // action.addToPlaylist.added is translated into all 31 languages and was
++    // never shown anywhere, so adding to a playlist gave no feedback at all.
++    notifyAddedToPlaylist(pid, pitems) {
++      const count = (pitems || []).length;
++      const playlist = (this.playlists.listing || []).find((p) => p.id == pid);
++      const name = playlist?.attributes?.name ?? this.getLz("term.playlist");
++      const values = {
++        count: count,
++        tracks: this.getLz("term.track", { count: count }),
++        // notyf sets the message with innerHTML, and playlist names are
++        // user-controlled, so the name must not be treated as markup.
++        playlist: name.replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";"),
++      };
++      // Single-brace placeholders; stringTemplateParser only fills {{double}}.
++      notyf.success(this.getLz("action.addToPlaylist.added").replace(/\{(\w+)\}/g, (m, k) => (k in values ? values[k] : m)));
+     },
+     // The POST above succeeded, so the tracks really are in the playlist now.
+     // trackMapping is otherwise only ever rebuilt by a full deepScan in
+@@ -3457,10 +3482,16 @@
+     },
+     addToLibrary(id) {
+       let self = this;
+-      this.mk.addToLibrary(id).then((data) => {
+-        self.getLibrarySongsFull(true);
+-      });
+-      notyf.success(app.getLz("action.addToLibrary.success"));
++      this.mk.addToLibrary(id).then(
++        (data) => {
++          notyf.success(app.getLz("action.addToLibrary.success"));
++          self.getLibrarySongsFull(true);
++        },
++        (err) => {
++          console.error("addToLibrary failed", err);
++          notyf.error(app.getLz("action.addToLibrary.error"));
++        },
++      );
+     },
+     removeFromLibrary(kind, id) {
+       let self = this;
+@@ -3475,10 +3506,16 @@
+             },
+           },
+         )
+-        .then((data) => {
+-          self.getLibrarySongsFull(true);
+-        });
+-      notyf.success(app.getLz("action.removeFromLibrary.success"));
++        .then(
++          (data) => {
++            notyf.success(app.getLz("action.removeFromLibrary.success"));
++            self.getLibrarySongsFull(true);
++          },
++          (err) => {
++            console.error("removeFromLibrary failed", err);
++            notyf.error(app.getLz("term.requestError"));
++          },
++        );
+     },
+     async loadYTLyrics() {
+       const track = this.mk.nowPlayingItem != null ? this.mk.nowPlayingItem.title ?? "" : "";
+--- a/src/renderer/views/pages/cider-playlist.ejs
++++ b/src/renderer/views/pages/cider-playlist.ejs
+@@ -603,7 +603,13 @@
+         this.descriptionEditing = false
+       },
+       addToLibrary(id) {
+-        app.mk.addToLibrary(id)
++        app.mk.addToLibrary(id).then(
++          () => notyf.success(app.getLz("action.addToLibrary.success")),
++          (err) => {
++            console.error("addToLibrary failed", err)
++            this.inLibrary = false
++            notyf.error(app.getLz("action.addToLibrary.error"))
++          })
+         this.inLibrary = true
+         this.confirm = false
+       },
+@@ -621,6 +627,12 @@
+             fetchOptions: {
+               method: "DELETE"
+             }
++          }).then(
++          () => notyf.success(app.getLz("action.removeFromLibrary.success")),
++          (err) => {
++            console.error("removeFromLibrary failed", err)
++            this.inLibrary = true
++            notyf.error(app.getLz("term.requestError"))
+           })
+         this.inLibrary = false
+         this.confirm = false
+--- a/src/renderer/views/pages/playlist-inline.ejs
++++ b/src/renderer/views/pages/playlist-inline.ejs
+@@ -408,7 +408,13 @@
+         this.nameEditing = false
+       },
+       addToLibrary(id) {
+-        app.mk.addToLibrary(id)
++        app.mk.addToLibrary(id).then(
++          () => notyf.success(app.getLz("action.addToLibrary.success")),
++          (err) => {
++            console.error("addToLibrary failed", err)
++            this.inLibrary = false
++            notyf.error(app.getLz("action.addToLibrary.error"))
++          })
+         this.inLibrary = true
+         this.confirm = false
+       },
+@@ -426,6 +432,12 @@
+             fetchOptions: {
+               method: "DELETE"
+             }
++          }).then(
++          () => notyf.success(app.getLz("action.removeFromLibrary.success")),
++          (err) => {
++            console.error("removeFromLibrary failed", err)
++            this.inLibrary = true
++            notyf.error(app.getLz("term.requestError"))
+           })
+         this.inLibrary = false
+         this.confirm = false
