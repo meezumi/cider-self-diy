@@ -1,0 +1,85 @@
+--- a/build/plugins/discordrpc.js
++++ b/build/plugins/discordrpc.js
+@@ -48,6 +48,12 @@
+      * Runs on app ready
+      */
+     onReady(_win) {
++        // cider.sh no longer serves "Listen on Cider" links, so store the buttons that replace it
++        const configured = ["first", "second"].map((key) => this._utils.getStoreValue(`connectivity.discord_rpc.activity.buttons.${key}`));
++        if (configured.includes("listenOnCider")) {
++            const buttons = this.activityButtons();
++            ["first", "second"].forEach((key, i) => this._utils.setStoreValue(`connectivity.discord_rpc.activity.buttons.${key}`, buttons[i] ?? "disabled"));
++        }
+         this.connect();
+         console.debug(`[Plugin][${this.name}] Ready.`);
+     }
+@@ -196,26 +202,38 @@
+         this._activityCache = activity;
+     }
+     /**
++     * The configured activity buttons, with the retired "Listen on Cider" link swapped for one that still works
++     */
++    activityButtons() {
++        const wanted = ["first", "second"].map((key) => this._utils.getStoreValue(`connectivity.discord_rpc.activity.buttons.${key}`));
++        if (wanted[0] == "disabled") {
++            wanted.length = 0;
++        }
++        const requested = wanted.filter((button) => button && button != "disabled");
++        const buttons = requested.filter((button) => button != "listenOnCider");
++        for (const button of ["viewOnAppleMusic", "viewOnOtherMusicServices"]) {
++            if (buttons.length < requested.length && !buttons.includes(button)) {
++                buttons.push(button);
++            }
++        }
++        return buttons;
++    }
++    /**
+      * Filter the Discord activity object
+      */
+     filterActivity(activity, attributes) {
+         // Handling Activity Buttons
+         if (this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.enabled") && this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.first") != "disabled") {
+             const activityUrls = {
+-                listenOnCider: "cider",
+                 viewOnAppleMusic: "appleMusic",
+                 viewOnOtherMusicServices: "songLink",
+             };
+-            const firstActivity = this._utils.getLocale(this._utils.getStoreValue("general.language"), `settings.option.connectivity.discordRPC.buttons.${this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.first")}`);
+-            const secondActivity = this._utils.getLocale(this._utils.getStoreValue("general.language"), `settings.option.connectivity.discordRPC.buttons.${this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.second")}`);
+-            if (this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.second") != "disabled") {
+-                activity.buttons = [
+-                    { label: firstActivity, url: attributes.url[activityUrls[this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.first")]] },
+-                    { label: secondActivity, url: attributes.url[activityUrls[this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.second")]] },
+-                ];
+-            }
+-            else {
+-                activity.buttons = [{ label: firstActivity, url: attributes.url[activityUrls[this._utils.getStoreValue("connectivity.discord_rpc.activity.buttons.first")]] }];
++            // Discord rejects the whole activity if a button has no valid link
++            activity.buttons = this.activityButtons()
++                .map((button) => ({ label: this._utils.getLocale(this._utils.getStoreValue("general.language"), `settings.option.connectivity.discordRPC.buttons.${button}`), url: attributes.url[activityUrls[button]] }))
++                .filter((button) => typeof button.url === "string" && button.url.startsWith("https://"));
++            if (!activity.buttons.length) {
++                delete activity.buttons;
+             }
+         }
+         // Add the timestamp if its playing and people want them
+--- a/src/renderer/views/components/settings-window.ejs
++++ b/src/renderer/views/components/settings-window.ejs
+@@ -1216,7 +1216,7 @@
+                                             <div class="md-option-segment md-option-segment_auto">
+                                                 <label>
+                                                     <select class="md-select" v-model="app.cfg.connectivity.discord_rpc.activity.buttons.first" @change="$event.target.value == 'disabled' ? app.cfg.connectivity.discord_rpc.activity.buttons.second = 'disabled' : ''">
+-                                                        <option v-for="option in app.cfg.connectivity.discord_rpc.activity.buttons.options" v-bind:value="option" v-show="app.cfg.connectivity.discord_rpc.activity.buttons.second != option">{{ $root.getLz(`settings.option.connectivity.discordRPC.buttons.${option}`) }}</option>
++                                                        <option v-for="option in app.cfg.connectivity.discord_rpc.activity.buttons.options.filter(o => o != 'listenOnCider')" v-bind:value="option" v-show="app.cfg.connectivity.discord_rpc.activity.buttons.second != option">{{ $root.getLz(`settings.option.connectivity.discordRPC.buttons.${option}`) }}</option>
+                                                         <option value="disabled">{{$root.getLz('term.disabled')}}</option>
+                                                     </select>
+                                                 </label>
+@@ -1230,7 +1230,7 @@
+                                             <div class="md-option-segment md-option-segment_auto">
+                                                 <label>
+                                                     <select class="md-select" v-model="app.cfg.connectivity.discord_rpc.activity.buttons.second">
+-                                                        <option v-for="option in app.cfg.connectivity.discord_rpc.activity.buttons.options" v-bind:value="option" v-show="app.cfg.connectivity.discord_rpc.activity.buttons.first != option">{{ $root.getLz(`settings.option.connectivity.discordRPC.buttons.${option}`) }}</option>
++                                                        <option v-for="option in app.cfg.connectivity.discord_rpc.activity.buttons.options.filter(o => o != 'listenOnCider')" v-bind:value="option" v-show="app.cfg.connectivity.discord_rpc.activity.buttons.first != option">{{ $root.getLz(`settings.option.connectivity.discordRPC.buttons.${option}`) }}</option>
+                                                         <option value="disabled">{{$root.getLz('term.disabled')}}</option>
+                                                     </select>
+                                                 </label>

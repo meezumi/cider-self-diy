@@ -1,0 +1,29 @@
+--- a/node_modules/discord-rpc/src/client.js
++++ b/node_modules/discord-rpc/src/client.js
+@@ -528,6 +528,7 @@
+     return this.request(RPCCommands.SET_ACTIVITY, {
+       pid,
+       activity: {
++        type: args.type,
+         state: args.state,
+         details: args.details,
+         timestamps,
+--- a/build/plugins/discordrpc.js
++++ b/build/plugins/discordrpc.js
+@@ -169,6 +169,7 @@
+         }
+         // Check if show buttons is (true) or (false)
+         let activity = {
++            type: 2, // Listening
+             details: this._utils.getStoreValue("connectivity.discord_rpc.activity.details_format"),
+             state: this._utils.getStoreValue("connectivity.discord_rpc.activity.state_format"),
+             largeImageKey: (_b = (_a = attributes === null || attributes === void 0 ? void 0 : attributes.artwork) === null || _a === void 0 ? void 0 : _a.url) === null || _b === void 0 ? void 0 : _b.replace("{w}", "1024").replace("{h}", "1024"),
+@@ -218,7 +219,7 @@
+             }
+         }
+         // Add the timestamp if its playing and people want them
+-        if (!this._utils.getStoreValue("connectivity.discord_rpc.hide_timestamp") && attributes.status && new Date(attributes.endTime).getTime() > 0 && isFinite(attributes.endTime) && isFinite(attributes.startTime)) {
++        if (!this._utils.getStoreValue("connectivity.discord_rpc.activity.hide_timestamp") && attributes.status && new Date(attributes.endTime).getTime() > 0 && isFinite(attributes.endTime) && isFinite(attributes.startTime)) {
+             activity.startTimestamp = Date.now() - ((attributes === null || attributes === void 0 ? void 0 : attributes.durationInMillis) - (attributes === null || attributes === void 0 ? void 0 : attributes.remainingTime));
+             activity.endTimestamp = attributes.endTime;
+         }
