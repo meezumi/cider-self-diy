@@ -1,0 +1,131 @@
+--- a/src/preload/cider-preload.js
++++ b/src/preload/cider-preload.js
+@@ -162,6 +162,7 @@
+     attributes.songId = attributes.songId ?? attributes.playParams?.catalogId ?? attributes.playParams?.id;
+     attributes.kind = nowPlayingItem?.type ?? attributes?.type ?? attributes.playParams?.kind ?? "";
+     attributes.status = nowPlayingItem == null ? null : !!isPlayingExport;
++    attributes.playbackState = mk.playbackState;
+     attributes.name = attributes?.name ?? "no-title-found";
+     attributes.artwork = attributes?.artwork ?? { url: "" };
+     attributes.artwork.url = (attributes?.artwork?.url ?? "").replace(`{f}`, "png");
+--- a/build/plugins/discordrpc.js
++++ b/build/plugins/discordrpc.js
+@@ -32,6 +32,12 @@
+          * Plugin Initialization
+          */
+         this._client = null;
++        // What Discord was last sent: undefined before the first send, null once cleared
++        this._sentActivity = undefined;
++        this._pendingActivity = undefined;
++        this._sendTimer = null;
++        this._lastSendAt = 0;
++        this._lastReportAt = 0;
+         this._activityCache = {
+             details: "",
+             state: "",
+@@ -147,6 +153,12 @@
+         // Create the client
+         this._client = new discord_auto_rpc_1.AutoClient({ transport: "ipc" });
+         // Runs on Ready
++        // Every connection, including a reconnect after Discord restarts, starts with no
++        // activity shown, so forget what was sent and let the next report go through
++        this._client.on("connected", () => {
++            this._sentActivity = undefined;
++            this._lastSendAt = 0;
++        });
+         this._client.once("ready", () => {
+             console.info(`[DiscordRPC][connect] Successfully Connected to Discord. Authed for user: ${this._client.user.id}.`);
+             if (this._activityCache && this._activityCache.details && this._activityCache.state && !this._utils.getStoreValue("general.privateEnabled")) {
+@@ -191,17 +203,90 @@
+         if (!activity) {
+             return;
+         }
++        const reportedAt = (this._lastReportAt = Date.now());
++        // Loading (1), seeking (6), waiting (8) and stalled (9) report as not playing, but
++        // playback is about to carry on; keep the activity rather than clearing it for a moment
++        if (!attributes.status && [1, 6, 8, 9].includes(attributes.playbackState)) {
++            return;
++        }
++        // A song ending (5) also reports as not playing, just before the next one starts.
++        // Clear only if nothing else is reported for two seconds: the end of the queue.
++        if (!attributes.status && attributes.playbackState == 5) {
++            setTimeout(() => {
++                if (this._lastReportAt === reportedAt && this._utils.getStoreValue("connectivity.discord_rpc.clear_on_pause")) {
++                    this.sendActivity(null);
++                }
++            }, 2000);
++            return;
++        }
+         if (!attributes.status && this._utils.getStoreValue("connectivity.discord_rpc.clear_on_pause")) {
+-            this._client.clearActivity();
++            this.sendActivity(null);
+         }
+         else if (activity && this._activityCache !== activity) {
+             if (this._utils.getStoreValue("general.privateEnabled"))
+                 return;
+-            this._client.setActivity(activity);
++            this.sendActivity(activity);
+         }
+         this._activityCache = activity;
+     }
+     /**
++     * Send an activity (null clears it) if it differs from what Discord already has.
++     * Playback reports several times a second, and Discord rate-limits how often it passes
++     * presence updates on to other people, so repeats would delay real changes.
++     * A change goes out at once; changes closer together than a second are coalesced
++     * and the latest is sent when the second is up.
++     */
++    sendActivity(activity) {
++        const current = this._sendTimer ? this._pendingActivity : this._sentActivity;
++        if (!this.activityChanged(current, activity)) {
++            return;
++        }
++        this._pendingActivity = activity;
++        const wait = this._lastSendAt + 1000 - Date.now();
++        if (wait > 0) {
++            if (!this._sendTimer) {
++                this._sendTimer = setTimeout(() => {
++                    this._sendTimer = null;
++                    this.flushActivity();
++                }, wait);
++            }
++            return;
++        }
++        this.flushActivity();
++    }
++    flushActivity() {
++        const activity = this._pendingActivity;
++        if (activity && this._utils.getStoreValue("general.privateEnabled")) {
++            return;
++        }
++        this._lastSendAt = Date.now();
++        this._sentActivity = activity;
++        const request = activity ? this._client.setActivity(activity) : this._client.clearActivity();
++        Promise.resolve(request).catch((e) => console.error(`[DiscordRPC][sendActivity] ${e}`));
++    }
++    /**
++     * Whether two activities differ in anything Discord shows. The timestamps are recomputed
++     * from the playback clock on every report, so they only count as changed when they
++     * move by more than a second, which a seek does and clock jitter does not.
++     */
++    activityChanged(previous, next) {
++        if (previous === undefined) {
++            return true;
++        }
++        if (!previous || !next) {
++            return previous !== next;
++        }
++        const { startTimestamp: previousStart, endTimestamp: previousEnd, ...previousRest } = previous;
++        const { startTimestamp: nextStart, endTimestamp: nextEnd, ...nextRest } = next;
++        if (JSON.stringify(previousRest) !== JSON.stringify(nextRest)) {
++            return true;
++        }
++        if ((previousStart == null) !== (nextStart == null) || (previousEnd == null) !== (nextEnd == null)) {
++            return true;
++        }
++        return Math.abs((nextStart || 0) - (previousStart || 0)) > 1000 || Math.abs((nextEnd || 0) - (previousEnd || 0)) > 1000;
++    }
++    /**
+      * The configured activity buttons, with the retired "Listen on Cider" link swapped for one that still works
+      */
+     activityButtons() {
