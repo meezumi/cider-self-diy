@@ -1,0 +1,126 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -11,6 +11,9 @@
+ // A catalog lookup can lag behind an add or remove made here, so for this long
+ // after a local change the lookup does not get to overwrite it.
+ const LOCAL_LIBRARY_STATE_MS = 30000;
++// Playlist adds made here, kept so a playlist scan that was already running
++// when one happened can put it back. See recordPlaylistTrackMapping().
++const recentPlaylistAdds = [];
+ 
+ /* @namespace */
+ const app = new Vue({
+@@ -742,20 +745,21 @@
+       app.newPlaylist(app.getLz("term.newPlaylist"), pl_items);
+     },
+     async isSongInPlaylist(song_ids, playlist_id) {
+-      let isInPlaylist = false;
+-      const playlistTracks = (
+-        await app.mk.api.v3.music(`/v1/me/library/playlists/${playlist_id}/tracks`, {
+-          platform: "web",
+-          l: app.mklang,
+-        })
+-      ).data?.data;
+-
+-      playlistTracks.forEach((track) => {
+-        if (song_ids.includes(track.id)) {
+-          isInPlaylist = true;
+-        }
++      // The track map covers every playlist under both library and catalog ids,
++      // and adds made here update it, so it answers without a request -- which
++      // otherwise delayed every add by a round trip before it was even sent.
++      const trackMapping = this.cfg.advanced.playlistTrackMapping ? this.playlists.trackMapping : null;
++      if (trackMapping && Object.keys(trackMapping).length) {
++        return song_ids.some((id) => (trackMapping[id] || []).includes(playlist_id));
++      }
++      // No map: ask Apple. All pages (one request returns at most 100 tracks),
++      // and catalog ids too -- a song added from the catalog is listed under a
++      // library id, so comparing only track.id never matched it.
++      const playlistTracks = await MusicKitTools.v3Continuous({
++        href: `/v1/me/library/playlists/${playlist_id}/tracks`,
++        options: { platform: "web", l: app.mklang },
+       });
+-      return isInPlaylist;
++      return playlistTracks.some((track) => song_ids.includes(track.id) || song_ids.includes(track.attributes?.playParams?.catalogId));
+     },
+     addToPlaylist(pid, pitems) {
+       app.mk.api.v3
+@@ -811,28 +815,31 @@
+       if (!this.cfg.advanced.playlistTrackMapping) {
+         return;
+       }
++      const ids = (pitems || []).filter((item) => item && item.id).map((item) => item.id);
++      recentPlaylistAdds.push({ at: Date.now(), pid: pid, ids: ids });
+       const trackMapping = this.playlists.trackMapping;
+       if (!trackMapping) {
+         return;
+       }
++      if (this.mergePlaylistTracks(trackMapping, pid, ids)) {
++        CiderCache.putCache("library-playlists-tracks", trackMapping);
++      }
++    },
++    // Marks ids as present in playlist pid; returns whether anything changed.
++    mergePlaylistTracks(trackMapping, pid, ids) {
+       let changed = false;
+-      (pitems || []).forEach((item) => {
+-        if (!item || !item.id) {
+-          return;
+-        }
+-        const owners = trackMapping[item.id];
++      ids.forEach((id) => {
++        const owners = trackMapping[id];
+         if (!owners) {
+           // New key: Vue 2 cannot detect a plain property addition.
+-          this.$set(trackMapping, item.id, [pid]);
++          this.$set(trackMapping, id, [pid]);
+           changed = true;
+         } else if (!owners.includes(pid)) {
+           owners.push(pid);
+           changed = true;
+         }
+       });
+-      if (changed) {
+-        CiderCache.putCache("library-playlists-tracks", trackMapping);
+-      }
++      return changed;
+     },
+     async addSelectedToPlaylist(playlist_id) {
+       let self = this;
+@@ -1725,11 +1732,10 @@
+           playlist.tracks = [];
+           try {
+             if (trackMap) {
+-              let tracks = await app.mk.api.v3.music(playlist.href + "/tracks").catch((e) => {
+-                // no tracks
+-                e = null;
+-              });
+-              tracks.data.data.forEach((track) => {
++              // Every page: one request returns at most 100 tracks, so songs
++              // further down a long playlist were never marked as present.
++              let tracks = await MusicKitTools.v3Continuous({ href: playlist.href + "/tracks" });
++              tracks.forEach((track) => {
+                 if (!trackMapping[track.id]) {
+                   trackMapping[track.id] = [];
+                 }
+@@ -1753,12 +1759,21 @@
+         });
+       }
+ 
++      const scanStartedAt = Date.now();
+       await deepScan();
+ 
+       this.library.backgroundNotification.show = false;
+       this.playlists.listing = newListing;
+       self.sortPlaylists();
+       if (trackMap) {
++        // An add made while the scan ran may have landed after its playlist
++        // was read, and replacing the map would drop it until the next scan.
++        recentPlaylistAdds.forEach((add) => {
++          if (add.at >= scanStartedAt) {
++            this.mergePlaylistTracks(trackMapping, add.pid, add.ids);
++          }
++        });
++        recentPlaylistAdds.splice(0, recentPlaylistAdds.length, ...recentPlaylistAdds.filter((add) => add.at >= scanStartedAt));
+         CiderCache.putCache("library-playlists-tracks", trackMapping);
+         this.playlists.trackMapping = trackMapping;
+       }

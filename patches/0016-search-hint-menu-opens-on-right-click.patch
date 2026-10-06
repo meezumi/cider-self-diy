@@ -1,0 +1,23 @@
+--- a/src/renderer/views/components/smarthints.ejs
++++ b/src/renderer/views/components/smarthints.ejs
+@@ -1,8 +1,8 @@
+ <script type="text/x-template" id="mediaitem-smarthints">
+-<div class="cd-queue-item"  @click="$root.search.showHints = false;$root.routeView(item);$root.search.cursor = -1;$root.search.term == ''" @contextmenu="$root.hintscontext = true;getContextMenu()"
++<div class="cd-queue-item"  @click="$root.search.showHints = false;$root.routeView(item);$root.search.cursor = -1;$root.search.term == ''" @contextmenu="$root.hintscontext = true;getContextMenu($event)"
+     :class="{'hintactive': ($root.search.cursor == position + $root.search.hints.filter((a) => {return a.content == null}).length)}">
+-    <div class="row"  @contextmenu="$root.hintscontext = true;getContextMenu()">
+-        <div class="col-auto cider-flex-center" @contextmenu="$root.hintscontext = true;getContextMenu()">
++    <div class="row">
++        <div class="col-auto cider-flex-center">
+             <div class="artwork"  :class="{'circle': item.type == 'artists'}">
+                 <mediaitem-artwork
+                 :url="item.attributes.artwork ? item.attributes.artwork.url : ''"
+@@ -15,7 +15,7 @@
+                 </button>
+             </div>
+         </div>
+-        <div class="col queue-info" @contextmenu="$root.hintscontext = true;getContextMenu()">
++        <div class="col queue-info">
+             <div class="queue-title text-overflow-elipsis">{{ item.attributes.name }}
+             </div>
+             <div class="queue-subtitle text-overflow-elipsis">{{

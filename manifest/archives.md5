@@ -12,4 +12,6 @@ da7f31714d771f2d652a219349ef985f  app.asar.v10-menu-library-state
 8f34dab84f03496bb1993d8cf384b80b  app.asar.v11-lyrics-mxm-setting
 a2c9e9bc3740dfa51db4d21ef28b404e  app.asar.v12-discord-socket
 53bd8c12b3eba6d33071b11529265551  app.asar.v14-discord-buttons
-3574ad679cec6ec51fced1fe6a2d4bb4  app.asar.patched
+3574ad679cec6ec51fced1fe6a2d4bb4  app.asar.v15-discord-send-changes
+7fc8602ab53abaf7b9f93c53b184a34a  app.asar.v16-search-hint-menu
+464bd8f8309158581901f19c6e41c62b  app.asar.patched
