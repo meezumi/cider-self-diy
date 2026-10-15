@@ -1,0 +1,188 @@
+--- a/src/renderer/views/pages/cider-playlist.ejs
++++ b/src/renderer/views/pages/cider-playlist.ejs
+@@ -120,14 +120,31 @@
+                                     <img :class="(!inLibrary) ? 'md-ico-add' : 'md-ico-remove'">
+                                     {{app.getLz('term.confirm')}}
+                                 </button>
+-                                <select v-if="shouldPaginate" class="md-select" v-model="prefs.scroll">
+-                                    <optgroup :label="app.getLz('term.scroll')">
+-                                        <option value="infinite">{{app.getLz('term.scroll.infinite')}}</option>
+-                                        <option value="paged">
+-                                            {{app.getLz('term.scroll.paged').replace("${songsPerPage}", pageSize)}}
+-                                        </option>
+-                                    </optgroup>
+-                                </select>
++                                <div v-if="isPlaylist && !editing" class="playlist-sort">
++                                    <label class="playlist-select">
++                                        <span class="playlist-select-label">{{app.getLz('term.sortBy')}}</span>
++                                        <select class="md-select" v-model="sortBy">
++                                            <option v-for="(label, key) in sortingOptions" :value="key">{{ label }}</option>
++                                        </select>
++                                    </label>
++                                    <button v-if="sortBy != 'none'" class="playlist-sort-order"
++                                            @click="sortOrder = (sortOrder == 'asc') ? 'desc' : 'asc'"
++                                            :title="app.getLz(sortOrder == 'asc' ? 'term.sortOrder.ascending' : 'term.sortOrder.descending')"
++                                            :aria-label="app.getLz(sortOrder == 'asc' ? 'term.sortOrder.ascending' : 'term.sortOrder.descending')">
++                                        <div class="codicon" :class="sortOrder == 'asc' ? 'codicon-arrow-up' : 'codicon-arrow-down'"></div>
++                                    </button>
++                                </div>
++                                <label v-if="shouldPaginate" class="playlist-select">
++                                    <span class="playlist-select-label">{{app.getLz('term.scroll')}}</span>
++                                    <select class="md-select" v-model="prefs.scroll">
++                                        <optgroup :label="app.getLz('term.scroll')">
++                                            <option value="infinite">{{app.getLz('term.scroll.infinite')}}</option>
++                                            <option value="paged">
++                                                {{app.getLz('term.scroll.paged').replace("${songsPerPage}", pageSize)}}
++                                            </option>
++                                        </optgroup>
++                                    </select>
++                                </label>
+                                 <div style="display: flex; float: right;">
+                                     <button :style="{ 'background': '#' + hasHeroObject()?.textColor4 ?? '' }"
+                                             :class="['search-btn', showSearch ? 'active' : '']" @click="toggleSearch()"
+@@ -190,14 +207,31 @@
+                                 <img :class="(!inLibrary) ? 'md-ico-add' : 'md-ico-remove'">
+                                 {{app.getLz('term.confirm')}}
+                             </button>
+-                            <select v-if="shouldPaginate" class="md-select" v-model="prefs.scroll">
+-                                <optgroup :label="app.getLz('term.scroll')">
+-                                    <option value="infinite">{{app.getLz('term.scroll.infinite')}}</option>
+-                                    <option value="paged">{{app.getLz('term.scroll.paged').replace("${songsPerPage}",
+-                                        pageSize)}}
+-                                    </option>
+-                                </optgroup>
+-                            </select>
++                            <div v-if="isPlaylist && !editing" class="playlist-sort">
++                                <label class="playlist-select">
++                                    <span class="playlist-select-label">{{app.getLz('term.sortBy')}}</span>
++                                    <select class="md-select" v-model="sortBy">
++                                        <option v-for="(label, key) in sortingOptions" :value="key">{{ label }}</option>
++                                    </select>
++                                </label>
++                                <button v-if="sortBy != 'none'" class="playlist-sort-order"
++                                        @click="sortOrder = (sortOrder == 'asc') ? 'desc' : 'asc'"
++                                        :title="app.getLz(sortOrder == 'asc' ? 'term.sortOrder.ascending' : 'term.sortOrder.descending')"
++                                        :aria-label="app.getLz(sortOrder == 'asc' ? 'term.sortOrder.ascending' : 'term.sortOrder.descending')">
++                                    <div class="codicon" :class="sortOrder == 'asc' ? 'codicon-arrow-up' : 'codicon-arrow-down'"></div>
++                                </button>
++                            </div>
++                            <label v-if="shouldPaginate" class="playlist-select">
++                                <span class="playlist-select-label">{{app.getLz('term.scroll')}}</span>
++                                <select class="md-select" v-model="prefs.scroll">
++                                    <optgroup :label="app.getLz('term.scroll')">
++                                        <option value="infinite">{{app.getLz('term.scroll.infinite')}}</option>
++                                        <option value="paged">{{app.getLz('term.scroll.paged').replace("${songsPerPage}",
++                                            pageSize)}}
++                                        </option>
++                                    </optgroup>
++                                </select>
++                            </label>
+                         </div>
+                     </div>
+                     <div class="col-auto cider-flex-center">
+@@ -243,7 +277,7 @@
+                                                                  :showIndex="true"
+                                                                  :showIndexPlaylist="(data.attributes.playParams?.kind ?? data.type ?? '').includes('playlist')"
+                                                                  :context-ext="buildContextMenu()"
+-                                                                 v-bind:key="item.id"
++                                                                 v-bind:key="rowKeys[index + start]"
+                                                                  v-for="(item,index) in currentSlice"></mediaitem-list-item>
+                                         </template>
+                                         <template v-else>
+@@ -352,6 +386,10 @@
+         hasNestedPlaylist: false,
+         showSearch: false,
+         pageSize: pageSize,
++        // How the track list is shown, not the playlist's order: "none" is
++        // the playlist's own order, which is also what Play uses.
++        sortBy: "none",
++        sortOrder: "asc",
+         start: 0,
+         end: pageSize,
+         prefs: this.$root.cfg.libraryPrefs.playlists
+@@ -383,6 +421,17 @@
+       }
+     },
+     watch: {
++      // Dragging reorders data.relationships.tracks.data by on-screen position,
++      // so a sorted view would save a scrambled order. Editing shows the real one.
++      editing(value) {
++        if (value) {
++          this.sortBy = "none";
++        }
++      },
++      // Newest additions first is the useful way round for Date Added.
++      sortBy(value) {
++        this.sortOrder = value == "dateAdded" ? "desc" : "asc";
++      },
+       data: {
+         handler: function() {
+           this.isInLibrary()
+@@ -406,7 +455,66 @@
+     },
+     computed: {
+       currentSlice() {
+-        return this.displayListing.slice(this.start, this.end);
++        return this.sortedListing.slice(this.start, this.end);
++      },
++      // One key per row. Keyed by song id alone, a song that is in the playlist
++      // twice gave two rows the same key: harmless while rows only append, but
++      // once a sort reorders them Vue's list update reads a row it has already
++      // moved and throws ("reading 'key'"), leaving the page half-updated and
++      // every later update failing. The nth copy of a song gets id#n.
++      rowKeys() {
++        const seen = {};
++        return this.sortedListing.map((item) => {
++          const id = item.id ?? item.attributes?.playParams?.id;
++          seen[id] = (seen[id] || 0) + 1;
++          return id + "#" + seen[id];
++        });
++      },
++      isPlaylist() {
++        return (this.data.attributes?.playParams?.kind ?? this.data.type ?? '').includes('playlist')
++      },
++      sortingOptions() {
++        return {
++          none: app.getLz('term.sortBy.none'),
++          dateAdded: app.getLz('term.sortBy.dateAdded'),
++          name: app.getLz('term.sortBy.name'),
++          artistName: app.getLz('term.sortBy.artist'),
++          albumName: app.getLz('term.sortBy.album'),
++          genre: app.getLz('term.sortBy.genre'),
++          releaseDate: app.getLz('term.sortBy.releaseDate'),
++          durationInMillis: app.getLz('term.sortBy.duration'),
++        }
++      },
++      // A sorted copy of displayListing (which the search box filters), so the
++      // playlist itself is never reordered. Missing values go last either way,
++      // and ties keep their playlist order.
++      //
++      // Apple returns no date for when a track was added to a playlist, but
++      // adds are appended, so a track's position is the order it was added in
++      // (unless the playlist was rearranged by hand). Date Added sorts by that.
++      sortedListing() {
++        if (!this.isPlaylist || this.sortBy == "none") {
++          return this.displayListing;
++        }
++        const key = this.sortBy;
++        const direction = this.sortOrder == "desc" ? -1 : 1;
++        const valueOf = (item) => {
++          const attributes = item.attributes ?? {};
++          const value = key == "genre" ? attributes.genreNames?.[0] : attributes[key];
++          return value === "" ? null : value ?? null;
++        };
++        return this.displayListing
++          .map((item, position) => ({ item, position, value: key == "dateAdded" ? position : valueOf(item) }))
++          .sort((a, b) => {
++            if (a.value == null || b.value == null) {
++              return (a.value == null) - (b.value == null) || a.position - b.position;
++            }
++            const order = typeof a.value == "number" && typeof b.value == "number"
++              ? a.value - b.value
++              : String(a.value).localeCompare(String(b.value), undefined, { numeric: true, sensitivity: "base" });
++            return order * direction || a.position - b.position;
++          })
++          .map((entry) => entry.item);
+       },
+       nestedSlices() {
+         if (this.shouldPaginate) {
