@@ -113,6 +113,21 @@ the installed one, so rollback still works if this checkout disappears.
 sidecar. Native `.node` binaries live in the sidecar because they can't be
 `dlopen`'d from inside an archive. Extraction fails without it.
 
+### When Cider says the token has expired
+
+Cider fetched its Apple developer token from `api.cider.sh`, which is gone,
+so it falls back to `TOKEN=` in its launcher. The token that works is the one
+Apple's web player ships, and it lasts about ten weeks.
+
+```sh
+./scripts/refresh-token.sh --check   # when does the launcher's token expire?
+./scripts/refresh-token.sh           # fetch a fresh one, verify it with Apple
+```
+
+The second form saves the new token to a private file and prints the one
+line that puts it in your launcher. It never edits the launcher itself and
+never prints the token.
+
 ## Two traps worth writing down
 
 **Pin the asar tool.** `@electron/asar` v4 requires a `**/` prefix on

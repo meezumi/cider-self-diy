@@ -4,3 +4,8 @@ build/
 node_modules/
 *.asar
 *.asar.unpacked/
+
+# Claude Code's per-session state, including scratch worktrees under
+# .claude/worktrees/ -- a `git add` of everything once committed one as a
+# submodule link.
+.claude/
