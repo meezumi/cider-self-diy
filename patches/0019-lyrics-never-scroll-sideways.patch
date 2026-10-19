@@ -1,0 +1,28 @@
+--- a/src/renderer/views/components/lyrics-view.ejs
++++ b/src/renderer/views/components/lyrics-view.ejs
+@@ -141,18 +141,19 @@
+                   let parentRect = parent.getBoundingClientRect()
+                   let lyricElementRect = lyricElement.getBoundingClientRect()
+                   let parentScrollTop = parent.scrollTop
+-                  let parentScrollLeft = parent.scrollLeft
+                   let parentScrollTopDiff = parentScrollTop - parentRect.top
+-                  let parentScrollLeftDiff = parentScrollLeft - parentRect.left
+                   let lyricElementScrollTop = lyricElementRect.top + parentScrollTopDiff
+-                  let lyricElementScrollLeft = lyricElementRect.left + parentScrollLeftDiff
+                   let scrollTopDiff = lyricElementScrollTop - parentScrollTop
+-                  let scrollLeftDiff = lyricElementScrollLeft - parentScrollLeft
+                   let scrollTop = parent.scrollTop + scrollTopDiff
+-                  let scrollLeft = parent.scrollLeft + scrollLeftDiff
++                  // Vertical only. `left` used to align the line's left edge with
++                  // the container's, but every line is indented (margin-left: 5%),
++                  // so whenever a line too long to wrap made the list wider than
++                  // the panel, each new line slid the whole list sideways and
++                  // clipped the start of every line. The list never needs to
++                  // scroll horizontally (it hides overflow-x), so keep it at 0.
+                   parent.scrollTo({
+                     top: scrollTop - (this.yoffset ?? 128),
+-                    left: scrollLeft,
++                    left: 0,
+                     behavior: 'smooth'
+                   })
+ 

@@ -1,0 +1,147 @@
+--- a/build/base/wsapi.js
++++ b/build/base/wsapi.js
+@@ -13,6 +13,29 @@
+ const ws = require("ws");
+ const electron = require("electron");
+ const WebSocketServer = ws.Server;
++// Values from a client's message reach the renderer as JSON literals, never
++// spliced into code. They used to be pasted between backticks or quotes, so a
++// search term containing one ended the string and ran whatever followed.
++// String(value) is what the template literal produced, so callers see the
++// same values as before.
++const jsString = (value) => JSON.stringify(String(value));
++const jsNumber = (value) => String(Number(value));
++const jsBool = (value) => String(value === true || value === "true");
++// The server is bound to localhost, but a browser will open a WebSocket to
++// localhost from any page, and always says which page in Origin. Clients that
++// are not browsers -- the webNowPlaying plugin, scripts, remote apps -- send
++// no Origin; pages served from this machine keep working.
++const isLocalOrigin = (origin) => {
++    if (!origin) {
++        return true;
++    }
++    try {
++        return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
++    }
++    catch (e) {
++        return false;
++    }
++};
+ class wsapi {
+     constructor(win) {
+         this.port = 26369;
+@@ -67,6 +90,7 @@
+             this.wss = new WebSocketServer({
+                 host: "localhost",
+                 port: this.port,
++                verifyClient: ({ origin }) => isLocalOrigin(origin),
+                 perMessageDeflate: {
+                     zlibDeflateOptions: {
+                         // See zlib defaults.
+@@ -101,7 +125,14 @@
+                 ws.on("message", function incoming(_message) { });
+                 // ws on message
+                 ws.on("message", (message) => {
+-                    let data = JSON.parse(message);
++                    let data;
++                    try {
++                        data = JSON.parse(message);
++                    }
++                    catch (e) {
++                        ws.send(JSON.stringify({ status: 1, data: {}, message: "Invalid JSON", type: "generic" }));
++                        return;
++                    }
+                     let response = {
+                         status: 0,
+                         data: {},
+@@ -128,15 +159,15 @@
+                             };
+                             break;
+                         case "play-next":
+-                            this._win.webContents.executeJavaScript(`wsapi.playNext(\`${data.type}\`,\`${data.id}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.playNext(${jsString(data.type)},${jsString(data.id)})`);
+                             response.message = "Play Next";
+                             break;
+                         case "play-later":
+-                            this._win.webContents.executeJavaScript(`wsapi.playLater(\`${data.type}\`,\`${data.id}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.playLater(${jsString(data.type)},${jsString(data.id)})`);
+                             response.message = "Play Later";
+                             break;
+                         case "quick-play":
+-                            this._win.webContents.executeJavaScript(`wsapi.quickPlay(\`${data.term}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.quickPlay(${jsString(data.term)})`);
+                             response.message = "Quick Play";
+                             break;
+                         case "get-lyrics":
+@@ -211,15 +242,15 @@
+                             response.message = "Previous";
+                             break;
+                         case "musickit-api":
+-                            this._win.webContents.executeJavaScript(`wsapi.musickitApi(\`${data.method}\`, \`${data.id}\`, ${JSON.stringify(data.params)} , ${data.library})`);
++                            this._win.webContents.executeJavaScript(`wsapi.musickitApi(${jsString(data.method)}, ${jsString(data.id)}, ${JSON.stringify(data.params)} , ${jsBool(data.library)})`);
+                             break;
+                         case "musickit-library-api":
+                             break;
+                         case "set-autoplay":
+-                            this._win.webContents.executeJavaScript(`wsapi.setAutoplay(${data.autoplay})`);
++                            this._win.webContents.executeJavaScript(`wsapi.setAutoplay(${jsBool(data.autoplay)})`);
+                             break;
+                         case "queue-move":
+-                            this._win.webContents.executeJavaScript(`wsapi.moveQueueItem(${data.from},${data.to})`);
++                            this._win.webContents.executeJavaScript(`wsapi.moveQueueItem(${jsNumber(data.from)},${jsNumber(data.to)})`);
+                             break;
+                         case "get-queue":
+                             this._win.webContents.executeJavaScript(`wsapi.getQueue()`);
+@@ -228,13 +259,13 @@
+                             if (!data.limit) {
+                                 data.limit = 10;
+                             }
+-                            this._win.webContents.executeJavaScript(`wsapi.search(\`${data.term}\`, \`${data.limit}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.search(${jsString(data.term)}, ${jsString(data.limit)})`);
+                             break;
+                         case "library-search":
+                             if (!data.limit) {
+                                 data.limit = 10;
+                             }
+-                            this._win.webContents.executeJavaScript(`wsapi.searchLibrary(\`${data.term}\`, \`${data.limit}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.searchLibrary(${jsString(data.term)}, ${jsString(data.limit)})`);
+                             break;
+                         case "show-window":
+                             this._win.show();
+@@ -243,7 +274,7 @@
+                             this._win.hide();
+                             break;
+                         case "play-mediaitem":
+-                            this._win.webContents.executeJavaScript(`wsapi.playTrackById("${data.id}", \`${data.kind}\`)`);
++                            this._win.webContents.executeJavaScript(`wsapi.playTrackById(${jsString(data.id)}, ${jsString(data.kind)})`);
+                             response.message = "Playing track";
+                             break;
+                         case "get-status":
+@@ -256,13 +287,13 @@
+                             this._win.webContents.executeJavaScript(`wsapi.getPlaybackState()`);
+                             break;
+                         case "library-status":
+-                            this._win.webContents.executeJavaScript(`wsapi.getLibraryStatus("${data.type}", "${data.id}")`);
++                            this._win.webContents.executeJavaScript(`wsapi.getLibraryStatus(${jsString(data.type)}, ${jsString(data.id)})`);
+                             break;
+                         case "rating":
+-                            this._win.webContents.executeJavaScript(`wsapi.rate("${data.type}", "${data.id}", ${data.rating})`);
++                            this._win.webContents.executeJavaScript(`wsapi.rate(${jsString(data.type)}, ${jsString(data.id)}, ${jsNumber(data.rating)})`);
+                             break;
+                         case "change-library":
+-                            this._win.webContents.executeJavaScript(`wsapi.changeLibrary("${data.type}", "${data.id}", ${data.add})`);
++                            this._win.webContents.executeJavaScript(`wsapi.changeLibrary(${jsString(data.type)}, ${jsString(data.id)}, ${jsBool(data.add)})`);
+                             break;
+                         case "quit":
+                             electron.app.quit();
+@@ -272,7 +303,9 @@
+                 });
+                 ws.on("close", () => {
+                     // remove client from list
+-                    this.clients.splice(wsapi.clients.indexOf(ws), 1);
++                    // Was wsapi.clients -- the class, which has no clients -- so
++                    // every disconnect threw in the main process.
++                    this.clients.splice(this.clients.indexOf(ws), 1);
+                     console.log(`Client ${ws.id} disconnected`);
+                 });
+                 ws.send(JSON.stringify(defaultResponse));
