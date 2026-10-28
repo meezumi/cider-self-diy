@@ -1,0 +1,72 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -4417,6 +4417,19 @@
+         this.search.term = item.content ? item.content?.attributes?.name ?? "" : item.displayTerm;
+       }
+     },
++    // Sidebar navigation means the search is finished, so the box, its
++    // suggestions and the old results go. Opening a result, or going back
++    // and forward, doesn't come through here and keeps them.
++    clearSearch() {
++      this.search.term = "";
++      this.search.cursor = -1;
++      this.search.hints = [];
++      this.search.showHints = false;
++      this.search.showSearchView = false;
++      this.search.results = {};
++      this.search.resultsSocial = {};
++      this.search.resultsLibrary = {};
++    },
+     async searchQuery(term = this.search.term) {
+       let self = this;
+       if (typeof term === "object") {
+@@ -4427,6 +4440,10 @@
+       if (term == "") {
+         return;
+       }
++      // Everything below reads this.search.term, so a term passed in -- the
++      // highlighted suggestion when Enter is pressed -- was ignored in favour
++      // of whatever was typed. Searching for it means showing it, too.
++      this.search.term = term;
+       //this.mk.api.v3.music(`/v1/catalog/${app.mk.storefrontId}/search?term=${this.search.term}`
+       this.mk.api.v3
+         .music(`/v1/catalog/${app.mk.storefrontId}/search?term=${encodeURIComponent(this.search.term)}`, {
+--- a/src/renderer/main/components/sidebar-library-item.js
++++ b/src/renderer/main/components/sidebar-library-item.js
+@@ -2,7 +2,7 @@
+ 
+ export const sidebarLibraryItem = Vue.component("sidebar-library-item", {
+   template: html`
+-    <button class="app-sidebar-item" :class="$root.getSidebarItemClass(page)" @click="$root.setWindowHash(page)">
++    <button class="app-sidebar-item" :class="$root.getSidebarItemClass(page)" @click="navigate">
+       <svg-icon :url="svgIconData" :name="'sidebar-' + svgIconName" v-if="svgIconData != ''" />
+       <span class="sidebar-item-text">{{ name }}</span>
+     </button>
+@@ -41,5 +41,14 @@
+       this.svgIconData = this.svgIcon;
+     }
+   },
+-  methods: {},
++  methods: {
++    // Leaving for another section ends the search; the Search entry itself
++    // (fullscreen mode has one) must not wipe it.
++    navigate() {
++      if (this.page != "search") {
++        this.$root.clearSearch();
++      }
++      this.$root.setWindowHash(this.page);
++    },
++  },
+ });
+--- a/src/renderer/views/components/sidebar-playlist.ejs
++++ b/src/renderer/views/components/sidebar-playlist.ejs
+@@ -107,6 +107,9 @@
+           if (this.playlistSelect) {
+             this.playlistSelect(this.item)
+           } else {
++            // Opening a playlist from the sidebar ends the search. Picking one
++            // in the Add to Playlist or share dialogs (playlistSelect) doesn't.
++            this.$root.clearSearch()
+             this.openPlaylist(this.item)
+           }
+         } else {
