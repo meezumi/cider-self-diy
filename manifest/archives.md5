@@ -18,4 +18,6 @@ a2c9e9bc3740dfa51db4d21ef28b404e  app.asar.v12-discord-socket
 51570b13ddbc57cad6353edd7ff3d232  app.asar.v18-playlist-sort
 abca06ec121a9986d6741bed4c49f428  app.asar.v19-lyrics-scroll
 688aa1b2b004a77988d293e68a1568a2  app.asar.v20-wsapi-local-only
-085b1539fee7d41c296ab9a53c574f88  app.asar.patched
+085b1539fee7d41c296ab9a53c574f88  app.asar.v21-sidebar-clears-search
+251ecd6a4fc2871ccbddb1c185f998ac  app.asar.v24-playlist-duplicates
+cc41e17a2da0863c48891b9cd5c8b5f9  app.asar.patched

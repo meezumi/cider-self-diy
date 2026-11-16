@@ -1,0 +1,70 @@
+--- a/src/renderer/main/musickittools.js
++++ b/src/renderer/main/musickittools.js
+@@ -7,30 +7,57 @@
+       GETBody: getBody,
+     });
+   },
++  // Every page of a paged Apple Music response, in order.
++  //
++  // This used to recurse, with each page's request for the rest wrapped in a
++  // retry: a failure many pages in re-ran the rest from an earlier page,
++  // appending the pages in between a second time. And `.catch(() => onError)`
++  // handed back the onError function itself as the response, so a failed
++  // request was never reported -- the next line threw on `response.data`.
++  //
++  // Now each page is fetched once, retried on its own when the failure is
++  // one a retry can fix, and kept only when it arrives. A failure that
++  // persists goes to onError and is thrown, as before.
+   async v3Continuous({ href, options = {}, reqOptions = {}, onProgress = () => {}, onError = () => {}, onSuccess = () => {} } = {}) {
++    const attempts = 3;
+     let returnData = [];
++    let next = href;
+ 
+-    async function sendReq(href, options) {
+-      const response = await app.mk.api.v3.music(href, options).catch((error) => onError);
++    while (next) {
++      let response;
++      for (let attempt = 1; ; attempt++) {
++        try {
++          response = await app.mk.api.v3.music(next, options);
++          break;
++        } catch (error) {
++          if (attempt >= attempts || !MusicKitTools.isRetryable(error)) {
++            onError(error);
++            throw error;
++          }
++          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
++        }
++      }
+ 
+-      returnData = returnData.concat(response.data.data);
+-      if (response.data.next) {
++      returnData = returnData.concat(response?.data?.data ?? []);
++      next = response?.data?.next;
++      if (next) {
+         onProgress({
+           response: response,
+           total: returnData.length,
+         });
+-        try {
+-          await sendReq(response.data.next, options);
+-        } catch (e) {
+-          await sendReq(response.data.next, options);
+-        }
+       }
+     }
+ 
+-    await sendReq(href, options);
+     onSuccess(returnData);
+     return returnData;
+   },
++  // MusicKit rejects with the HTTP response in error.data. No status means
++  // the request never got an answer. 429 and 5xx can pass; any other 4xx --
++  // 404 for an empty playlist, 401 when signed out -- will not.
++  isRetryable(error) {
++    const status = error?.data?.status;
++    return typeof status != "number" || status == 429 || status >= 500;
++  },
+   getHeader() {
+     return new Headers({
+       Authorization: "Bearer " + MusicKit.getInstance().developerToken,
