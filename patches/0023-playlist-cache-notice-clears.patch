@@ -1,0 +1,43 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -1714,6 +1714,11 @@
+       }
+ 
+       this.library.backgroundNotification.message = app.getLz("notification.buildingPlaylistCache");
++      // The scan has no total to count towards, and the library updates that
++      // share this notice leave theirs behind ("Building Playlist Cache...
++      // (2300 / 2300)"). Zero hides the count.
++      this.library.backgroundNotification.progress = 0;
++      this.library.backgroundNotification.total = 0;
+       this.library.backgroundNotification.show = true;
+ 
+       async function deepScan(parent = "p.playlistsroot") {
+@@ -1760,9 +1765,15 @@
+       }
+ 
+       const scanStartedAt = Date.now();
+-      await deepScan();
++      // A scan that fails -- signed out, or Apple not answering -- throws out
++      // of here, and the notice used to stay up for the rest of the session.
++      // It still throws, so a failed scan never replaces the playlists.
++      try {
++        await deepScan();
++      } finally {
++        this.library.backgroundNotification.show = false;
++      }
+ 
+-      this.library.backgroundNotification.show = false;
+       this.playlists.listing = newListing;
+       self.sortPlaylists();
+       if (trackMap) {
+--- a/src/renderer/views/components/sidebar.ejs
++++ b/src/renderer/views/components/sidebar.ejs
+@@ -302,7 +302,7 @@
+         </div>
+         <div class="app-sidebar-notification backgroundNotification" v-if="$root.library.backgroundNotification.show" >
+             <div class="message">
+-                {{ $root.library.backgroundNotification.message }} ({{$root.library.backgroundNotification.progress }} / {{ $root.library.backgroundNotification.total }})
++                {{ $root.library.backgroundNotification.message }}<template v-if="$root.library.backgroundNotification.total"> ({{$root.library.backgroundNotification.progress }} / {{ $root.library.backgroundNotification.total }})</template>
+             </div>
+         </div>
+     </div>
