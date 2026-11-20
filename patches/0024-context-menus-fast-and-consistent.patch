@@ -1,0 +1,589 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -3518,6 +3518,29 @@
+     lyricsAfterAM() {
+       this.loadQQLyrics();
+     },
++    // What this session knows about a song's library membership under any of
++    // its ids: the newest entry, or undefined.
++    knownLibraryStateFor(ids = []) {
++      let newest;
++      for (const id of ids) {
++        const entry = knownLibraryState.get(String(id ?? ""));
++        if (entry && (!newest || entry.at > newest.at)) {
++          newest = entry;
++        }
++      }
++      return newest;
++    },
++    // Apple's answer, unless this session added or removed the song moments
++    // ago -- from any menu, under any of its ids. The catalog can lag behind a
++    // change for a while, and every context menu asks through here so they
++    // all agree.
++    libraryStateFor(ids, answer) {
++      const known = this.knownLibraryStateFor(ids);
++      if (known?.local && Date.now() - known.at < LOCAL_LIBRARY_STATE_MS) {
++        return known.inLibrary;
++      }
++      return answer;
++    },
+     rememberLibraryState(id, inLibrary, local) {
+       const key = String(id ?? "");
+       if (!key) {
+@@ -3529,12 +3552,13 @@
+       }
+       knownLibraryState.set(key, { inLibrary: !!inLibrary, at: Date.now(), local: local });
+     },
+-    addToLibrary(id) {
++    // alsoIds: the song's other ids, recorded too so every menu sees the change.
++    addToLibrary(id, alsoIds = []) {
+       let self = this;
+       this.mk.addToLibrary(id).then(
+         (data) => {
+           notyf.success(app.getLz("action.addToLibrary.success"));
+-          app.rememberLibraryState(id, true, true);
++          [id, ...alsoIds].forEach((key) => app.rememberLibraryState(key, true, true));
+           self.getLibrarySongsFull(true);
+         },
+         (err) => {
+@@ -3543,7 +3567,7 @@
+         },
+       );
+     },
+-    removeFromLibrary(kind, id) {
++    removeFromLibrary(kind, id, alsoIds = []) {
+       let self = this;
+       let truekind = !kind.endsWith("s") ? kind + "s" : kind;
+       app.mk.api.v3
+@@ -3559,7 +3583,7 @@
+         .then(
+           (data) => {
+             notyf.success(app.getLz("action.removeFromLibrary.success"));
+-            app.rememberLibraryState(id, false, true);
++            [id, ...alsoIds].forEach((key) => app.rememberLibraryState(key, false, true));
+             self.getLibrarySongsFull(true);
+           },
+           (err) => {
+@@ -4503,7 +4527,9 @@
+         offset: 0,
+       });
+     },
+-    async inLibrary(items = []) {
++    // fresh: skip any cached answer, for a context menu that must reflect a
++    // change made a moment ago (cards and search suggestions do the same).
++    async inLibrary(items = [], fresh = false) {
+       let types = [];
+ 
+       for (let item of items) {
+@@ -4539,6 +4565,7 @@
+             "omit[resource]": "autos",
+             relate: "library",
+             fields: "inLibrary",
++            ...(fresh ? { extend: Math.random().toString(36).replace(/[^a-z]+/g, "").slice(2, 10) } : {}),
+           },
+           ...types2,
+         })
+@@ -5021,7 +5048,7 @@
+               name: app.getLz("action.addToLibrary") + " ...",
+               disabled: true,
+               action: function () {
+-                app.addToLibrary(app.mk.nowPlayingItem.id);
++                app.addToLibrary(app.mk.nowPlayingItem.id, nowPlayingIds);
+               },
+             },
+             {
+@@ -5030,7 +5057,7 @@
+               name: app.getLz("action.removeFromLibrary"),
+               hidden: true,
+               action: function () {
+-                self.removeFromLibrary(app.mk.nowPlayingItem.type, MusicKitInterop.getAttributes().songId);
++                self.removeFromLibrary(app.mk.nowPlayingItem.type, MusicKitInterop.getAttributes().songId, nowPlayingIds);
+               },
+             },
+             {
+@@ -5144,12 +5171,23 @@
+       };
+       // Same id the addToLibrary entry above adds with.
+       const libraryKey = String(app.mk.nowPlayingItem.id);
+-      if (knownLibraryState.has(libraryKey)) {
+-        setLibraryItems(knownLibraryState.get(libraryKey).inLibrary);
++      // Its other ids, so a change made from a card or a track row counts.
++      let songId;
++      try {
++        songId = MusicKitInterop.getAttributes()?.songId;
++      } catch (e) {
++        songId = undefined;
++      }
++      const nowPlayingIds = [libraryKey, songId, app.mk.nowPlayingItem.attributes?.playParams?.catalogId, app.mk.nowPlayingItem.attributes?.playParams?.id].filter((id) => id != null && id !== "");
++      const known = this.knownLibraryStateFor(nowPlayingIds);
++      if (known) {
++        setLibraryItems(known.inLibrary);
+       }
+       this.showMenuPanel(menus[useMenu], event);
+ 
+-      try {
++      // The library lookup and the rating, asked at once rather than one after
++      // the other. The lookup skips any cached answer.
++      const libraryLookup = (async () => {
+         // if its a radio station, then change the attributes to match a song
+         const nowPlayingItem = JSON.parse(JSON.stringify(this.mk.nowPlayingItem));
+         if (nowPlayingItem.type == "radioStation" && app.mk.nowPlayingItem.id != -1) {
+@@ -5158,18 +5196,25 @@
+           nowPlayingItem.attributes.playParams.id = app.mk.nowPlayingItem.id;
+           nowPlayingItem.id = app.mk.nowPlayingItem.id;
+         }
+-        let result = await this.inLibrary([nowPlayingItem]);
+-        // Still checked every time, so a change made on another device is
+-        // picked up; a recent change made here takes precedence over it.
+-        this.rememberLibraryState(libraryKey, result[0].attributes.inLibrary, false);
+-        setLibraryItems(knownLibraryState.get(libraryKey).inLibrary);
++        return await this.inLibrary([nowPlayingItem], true);
++      })();
++      const [result, rating] = await Promise.all([libraryLookup.catch(() => null), app.getRating(app.mk.nowPlayingItem).catch(() => null)]);
++
++      try {
++        if (result) {
++          // Still checked every time, so a change made on another device is
++          // picked up; a recent change made here takes precedence over it.
++          this.rememberLibraryState(libraryKey, result[0].attributes.inLibrary, false);
++          setLibraryItems(this.libraryStateFor(nowPlayingIds, knownLibraryState.get(libraryKey).inLibrary));
++        }
+       } catch (e) {
+         e = null;
+       }
+ 
+       try {
+-        let rating = await app.getRating(app.mk.nowPlayingItem);
+-        if (rating == 0) {
++        if (rating == null) {
++          // No answer: Love and Dislike stay greyed out.
++        } else if (rating == 0) {
+           menus.normal.headerItems.find((x) => x.id == "love").disabled = false;
+           menus.normal.headerItems.find((x) => x.id == "dislike").disabled = false;
+         } else if (rating == 1) {
+--- a/src/renderer/views/pages/cider-playlist.ejs
++++ b/src/renderer/views/pages/cider-playlist.ejs
+@@ -276,7 +276,7 @@
+                                                                  :index="index + start"
+                                                                  :showIndex="true"
+                                                                  :showIndexPlaylist="(data.attributes.playParams?.kind ?? data.type ?? '').includes('playlist')"
+-                                                                 :context-ext="buildContextMenu()"
++                                                                 :context-ext="rowContextMenu"
+                                                                  v-bind:key="rowKeys[index + start]"
+                                                                  v-for="(item,index) in currentSlice"></mediaitem-list-item>
+                                         </template>
+@@ -289,7 +289,7 @@
+                                                                      :index="index"
+                                                                      :showIndex="true"
+                                                                      :showIndexPlaylist="(data.attributes.playParams?.kind ?? data.type ?? '').includes('playlist')"
+-                                                                     :context-ext="buildContextMenu()"
++                                                                     :context-ext="rowContextMenu"
+                                                                      v-bind:key="item.id"
+                                                                      v-for="(item,index) in disc.tracks"></mediaitem-list-item>
+                                             </div>
+@@ -473,6 +473,12 @@
+       isPlaylist() {
+         return (this.data.attributes?.playParams?.kind ?? this.data.type ?? '').includes('playlist')
+       },
++      // The rows' extra menu items, built once. Called from the template, the
++      // method made a new object on every redraw of this page, and a new prop
++      // makes every track row redraw too.
++      rowContextMenu() {
++        return this.buildContextMenu()
++      },
+       sortingOptions() {
+         return {
+           none: app.getLz('term.sortBy.none'),
+@@ -561,10 +567,11 @@
+         if (app.appMode == 'fullscreen') {
+           return
+         }
+-        if (val) {
+-          this.classes = ["plmin"]
+-        } else {
+-          this.classes = []
++        // Runs on every scroll and wheel event. A new array, even an equal
++        // one, counts as a change, so each event redrew the page.
++        const classes = val ? ["plmin"] : []
++        if (this.classes.join(" ") != classes.join(" ")) {
++          this.classes = classes
+         }
+       },
+       openInfoModal() {
+--- a/src/renderer/views/components/mediaitem-list-item.ejs
++++ b/src/renderer/views/components/mediaitem-list-item.ejs
+@@ -15,7 +15,7 @@
+          @dblclick="route()"
+          @controller-click="route()"
+          tabindex="0"
+-         :class="[{'mediaitem-selected': app.select_hasMediaItem(guid)}, addClasses]">
++         :class="[{'mediaitem-selected': selected}, addClasses]">
+         <div v-show="isVisible" class="listitem-content">
+             <div class="popular"
+                  v-if="!showInLibrary && item?.meta?.popularity != null && item?.meta?.popularity > 0.7"></div>
+@@ -114,6 +114,9 @@
+         showInLibrary: false,
+         isVisible: false,
+         addedToLibrary: false,
++        // Whether addedToLibrary is Apple's answer rather than the default.
++        libraryChecked: false,
++        selected: false,
+         guid: this.uuidv4(),
+         app: this.$root,
+         displayDuration: true,
+@@ -136,6 +139,15 @@
+       'contextExt': { type: Object, required: false },
+       'class-list': { type: String, required: false, default: "" },
+     },
++    created() {
++      // Each row read the whole selection while drawing, so selecting one row
++      // -- a click, or the right-click that opens its menu -- redrew every
++      // row in the list. Watching only its own state, a row redraws when it
++      // is selected or deselected.
++      this.$watch(() => this.$root.select_hasMediaItem(this.guid), (value) => {
++        this.selected = value
++      }, { immediate: true })
++    },
+     mounted() {
+       if (this.item.attributes.playParams) {
+         this.itemId = this.item.attributes.playParams?.id ?? this.item.id;
+@@ -157,22 +169,53 @@
+         let color = `#${(this.item.attributes.artwork != null && this.item.attributes.artwork.bgColor != null) ? (this.item.attributes.artwork.bgColor) : ``}`
+         return color
+       },
+-      async checkLibrary() {
++      // Whether the song is in the library: true or false, or null when Apple
++      // could not be asked. A right-click (fresh) always asks Apple, skipping
++      // any cached answer, so the menu reflects a change made anywhere; a hover
++      // asks once per row. Either way, an add or remove made in Cider moments
++      // ago -- from any menu -- wins over Apple's answer, which can lag behind.
++      // This used to return before Apple answered, so the first right-click on
++      // a library song offered Add to Library.
++      async checkLibrary(fresh) {
++        // @mouseenter passes the event as the first argument.
++        fresh = fresh === true
+         if ((this.item?.id ?? '').toString().startsWith('ciderlocal')) {
+           return true
+         }
+-        if (this.addedToLibrary) {
+-          return this.addedToLibrary
+-        }
+         if (this.item.type.includes("library-playlists") || this.item.type.includes("station")) {
+           this.addedToLibrary = true
+-          return
++          return true
++        }
++        if (!fresh && (this.libraryChecked || this.addedToLibrary)) {
++          return this.$root.libraryStateFor(this.libraryIds(), this.addedToLibrary)
++        }
++        const ask = (skipCache) => this.$root.inLibrary([this.item], skipCache)
++          .then(res => res[0]?.attributes?.inLibrary ?? false, () => null)
++        let answer
++        if (fresh) {
++          answer = await ask(true)
++        } else {
++          if (!this.pendingLibraryCheck) {
++            this.pendingLibraryCheck = ask(false).finally(() => {
++              this.pendingLibraryCheck = null
++            })
++          }
++          answer = await this.pendingLibraryCheck
++        }
++        if (answer == null) {
++          return fresh ? null : this.addedToLibrary
+         }
+-        this.$root.inLibrary([this.item]).then(res => {
+-          this.addedToLibrary = res[0]?.attributes?.inLibrary ?? false
+-        })
++        this.libraryChecked = true
++        this.addedToLibrary = this.$root.libraryStateFor(this.libraryIds(), answer)
+         return this.addedToLibrary
+       },
++      // Every id this song goes by. An add or remove is recorded under the id
++      // the menu used -- a catalog id from a card, a library id from a
++      // playlist row -- so a lookup has to try them all.
++      libraryIds() {
++        const playParams = this.item.attributes?.playParams ?? {}
++        return [this.item.id, playParams.id, playParams.catalogId].filter((id) => id != null && id !== "")
++      },
+       getClasses() {
+         this.addClasses = {}
+         if (typeof this.item.attributes.playParams == "undefined" && this.item.type != "podcast-episodes") {
+@@ -526,23 +569,25 @@
+         }
+         app.showMenuPanel(menus[useMenu], event)
+ 
+-        try {
+-          await this.checkLibrary().then(res => {
+-            console.log(res)
+-            if (res) {
+-              menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
+-              menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
+-            } else {
+-              menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
+-            }
+-          })
+-
+-        } catch (e) {
+-
++        // The menu opens with Love, Dislike and Add to Library greyed out until
++        // these answer. They were asked one after the other; ask both at once.
++        const [inLibrary, rating] = await Promise.all([
++          this.checkLibrary(true),
++          app.getRating(self.item).catch((err) => {
++            console.log(err)
++            return null
++          }),
++        ])
++        if (inLibrary === true) {
++          menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
++          menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
++        } else if (inLibrary === false) {
++          menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
+         }
+         try {
+-          let rating = await app.getRating(self.item)
+-          if (rating == 0) {
++          if (rating == null) {
++            // No answer: leave them greyed out, as before.
++          } else if (rating == 0) {
+             menus.normal.headerItems.find(x => x.id == 'love').disabled = false
+             menus.normal.headerItems.find(x => x.id == 'dislike').disabled = false
+           } else if (rating == 1) {
+@@ -576,11 +621,11 @@
+         let item = this.item
+         if (item.attributes.playParams?.id) {
+           console.log('adding to library', item.attributes.playParams?.id)
+-          app.addToLibrary(item.attributes.playParams?.id.toString())
++          app.addToLibrary(item.attributes.playParams?.id.toString(), this.libraryIds())
+           this.addedToLibrary = true
+         } else if (item.id) {
+           console.log('adding to library', item.id)
+-          app.addToLibrary(item.id.toString())
++          app.addToLibrary(item.id.toString(), this.libraryIds())
+           this.addedToLibrary = true
+         }
+       },
+@@ -596,11 +641,11 @@
+         let truekind = (!kind.endsWith("s")) ? (kind + "s") : kind;
+         if (item.attributes.playParams?.id) {
+           console.log('remove from library', id)
+-          app.removeFromLibrary(truekind, id)
++          app.removeFromLibrary(truekind, id, this.libraryIds())
+           this.addedToLibrary = false
+         } else if (item.id) {
+           console.log('remove from library', id)
+-          app.removeFromLibrary(truekind, id)
++          app.removeFromLibrary(truekind, id, this.libraryIds())
+           this.addedToLibrary = false
+         }
+       },
+--- a/src/renderer/views/components/mediaitem-square.ejs
++++ b/src/renderer/views/components/mediaitem-square.ejs
+@@ -214,30 +214,43 @@
+         this.addedToLibrary = true
+       }
+     },
++    // Finds the library id, then removes through the app, which records
++    // the change for every menu and refreshes the library list.
++    // A library item already has its library id; a catalog one is looked up.
+     async removeFromLibrary(id) {
+-      let params = {
+-        relate: "library",
+-        "fields": "inLibrary",
+-        "extend": this.revisedRandId()
+-      }
+-      let kind = this.item.type ?? this.item.attributes.playParams.kind
++      const isLibraryItem = (this.item.type ?? "").startsWith("library-")
++      let kind = (this.item.type ?? this.item.attributes.playParams.kind).replace(/^library-/, "")
+       let truekind = (!kind.endsWith("s")) ? (kind + "s") : kind;
+       if (truekind == "musicVideos") {
+         truekind = "music-videos"
+       }
+-      let res = await app.mk.api.v3.music(`/v1/catalog/${app.mk.storefrontId}/?ids[${truekind}]=${this.item.attributes.playParams.id ?? this.item.id}`, params);
+-      res = res.data.data[0]
+-      if (res && res.relationships && res.relationships.library && res.relationships.library.data && res.relationships.library.data.length > 0) {
+-        id = res.relationships.library.data[0].id
+-      }
+-
+-      app.mk.api.v3.music(`v1/me/library/${truekind}/${id.toString()}`, {},
+-        {
+-          fetchOptions: {
+-            method: "DELETE"
++      if (!isLibraryItem) {
++        let params = {
++          relate: "library",
++          "fields": "inLibrary",
++          "extend": this.revisedRandId()
++        }
++        try {
++          let res = await app.mk.api.v3.music(`/v1/catalog/${app.mk.storefrontId}/?ids[${truekind}]=${this.item.attributes.playParams.id ?? this.item.id}`, params);
++          res = res.data.data[0]
++          if (res && res.relationships && res.relationships.library && res.relationships.library.data && res.relationships.library.data.length > 0) {
++            id = res.relationships.library.data[0].id
+           }
+-        })
+-      this.addedToLibrary = true
++        } catch (err) {
++          console.error("removeFromLibrary lookup failed", err)
++          notyf.error(app.getLz("term.requestError"))
++          return
++        }
++      }
++      app.removeFromLibrary(truekind, id.toString(), this.libraryIds())
++      this.addedToLibrary = false
++    },
++    // Every id this song goes by. An add or remove is recorded under the id
++    // the menu used -- a catalog id from a card, a library id from a
++    // playlist row -- so a lookup has to try them all.
++    libraryIds() {
++      const playParams = this.item.attributes?.playParams ?? {}
++      return [this.item.id, playParams.id, playParams.catalogId].filter((id) => id != null && id !== "")
+     },
+     uuidv4() {
+       return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+@@ -428,7 +441,7 @@
+               "action": function () {
+                 let item_id = self.item.attributes.playParams.id ?? self.item.id;
+                 let data_type = self.item.attributes.playParams.kind ?? self.item.type;
+-                app.addToLibrary(item_id);
++                app.addToLibrary(item_id, self.libraryIds());
+                 self.addedToLibrary = true;
+               }
+             },
+@@ -504,22 +517,25 @@
+       }
+       app.showMenuPanel(menus[useMenu], event)
+ 
+-      try {
+-        await this.isInLibrary().then((_) => {
+-          if (self.addedToLibrary) {
+-            menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
+-            menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
+-          } else {
+-            menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
+-          }
+-        })
+-
+-      } catch (e) {
+-
++      // Both answers at once rather than one after the other; an add or
++      // remove made here moments ago wins over the catalog, which can lag.
++      const [libraryAnswered, rating] = await Promise.all([
++        this.isInLibrary().then(() => true, () => false),
++        app.getRating(self.item).catch(() => null),
++      ])
++      if (libraryAnswered) {
++        self.addedToLibrary = app.libraryStateFor(self.libraryIds(), self.addedToLibrary)
++        if (self.addedToLibrary) {
++          menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
++          menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
++        } else {
++          menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
++        }
+       }
+       try {
+-        let rating = await app.getRating(self.item)
+-        if (rating == 0) {
++        if (rating == null) {
++          // No answer: Love and Dislike stay greyed out.
++        } else if (rating == 0) {
+           menus.normal.headerItems.find(x => x.id == 'love').disabled = false
+           menus.normal.headerItems.find(x => x.id == 'dislike').disabled = false
+         } else if (rating == 1) {
+--- a/src/renderer/views/components/smarthints.ejs
++++ b/src/renderer/views/components/smarthints.ejs
+@@ -78,6 +78,44 @@
+         revisedRandId() {
+             return Math.random().toString(36).replace(/[^a-z]+/g, '').slice(2, 10);
+         },
++        // Finds the library id, then removes through the app, which records
++        // the change for every menu and refreshes the library list.
++        // A library item already has its library id; a catalog one is looked up.
++        async removeFromLibrary(id) {
++          const isLibraryItem = (this.item.type ?? "").startsWith("library-")
++          let kind = (this.item.type ?? this.item.attributes.playParams.kind).replace(/^library-/, "")
++          let truekind = (!kind.endsWith("s")) ? (kind + "s") : kind;
++          if (truekind == "musicVideos") {
++            truekind = "music-videos"
++          }
++          if (!isLibraryItem) {
++            let params = {
++              relate: "library",
++              "fields": "inLibrary",
++              "extend": this.revisedRandId()
++            }
++            try {
++              let res = await app.mk.api.v3.music(`/v1/catalog/${app.mk.storefrontId}/?ids[${truekind}]=${this.item.attributes.playParams.id ?? this.item.id}`, params);
++              res = res.data.data[0]
++              if (res && res.relationships && res.relationships.library && res.relationships.library.data && res.relationships.library.data.length > 0) {
++                id = res.relationships.library.data[0].id
++              }
++            } catch (err) {
++              console.error("removeFromLibrary lookup failed", err)
++              notyf.error(app.getLz("term.requestError"))
++              return
++            }
++          }
++          app.removeFromLibrary(truekind, id.toString(), this.libraryIds())
++          this.addedToLibrary = false
++        },
++        // Every id this song goes by. An add or remove is recorded under the id
++        // the menu used -- a catalog id from a card, a library id from a
++        // playlist row -- so a lookup has to try them all.
++        libraryIds() {
++          const playParams = this.item.attributes?.playParams ?? {}
++          return [this.item.id, playParams.id, playParams.catalogId].filter((id) => id != null && id !== "")
++        },
+         uuidv4() {
+             return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+               (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+@@ -218,7 +256,7 @@
+                   "action": function () {
+                     let item_id = self.item.attributes.playParams.id ?? self.item.id;
+                     let data_type = self.item.attributes.playParams.kind ?? self.item.type;
+-                    app.addToLibrary(item_id);
++                    app.addToLibrary(item_id, self.libraryIds());
+                     self.addedToLibrary = true;
+                   }
+                 },
+@@ -293,22 +331,25 @@
+             })
+           }
+           app.showMenuPanel(menus[useMenu], event)
+-          try {
+-            await this.isInLibrary().then((_) => {
+-              if (self.addedToLibrary) {
+-                menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
+-                menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
+-              } else {
+-                menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
+-              }
+-            })
+-
+-          } catch (e) {
+-            console.log(e)
++          // Both answers at once rather than one after the other; an add or
++          // remove made here moments ago wins over the catalog, which can lag.
++          const [libraryAnswered, rating] = await Promise.all([
++            this.isInLibrary().then(() => true, () => false),
++            app.getRating(self.item).catch(() => null),
++          ])
++          if (libraryAnswered) {
++            self.addedToLibrary = app.libraryStateFor(self.libraryIds(), self.addedToLibrary)
++            if (self.addedToLibrary) {
++              menus.normal.items.find(x => x.id == 'addToLibrary').hidden = true
++              menus.normal.items.find(x => x.id == 'removeFromLibrary').hidden = false
++            } else {
++              menus.normal.items.find(x => x.id == 'addToLibrary').disabled = false
++            }
+           }
+           try {
+-            let rating = await app.getRating(self.item)
+-            if (rating == 0) {
++            if (rating == null) {
++              // No answer: Love and Dislike stay greyed out.
++            } else if (rating == 0) {
+               menus.normal.headerItems.find(x => x.id == 'love').disabled = false
+               menus.normal.headerItems.find(x => x.id == 'dislike').disabled = false
+             } else if (rating == 1) {
