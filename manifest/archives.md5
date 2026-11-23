@@ -21,4 +21,6 @@ abca06ec121a9986d6741bed4c49f428  app.asar.v19-lyrics-scroll
 085b1539fee7d41c296ab9a53c574f88  app.asar.v21-sidebar-clears-search
 251ecd6a4fc2871ccbddb1c185f998ac  app.asar.v24-playlist-duplicates
 cc41e17a2da0863c48891b9cd5c8b5f9  app.asar.v23-playlist-notice
-40a8dc291e045c3cc54ee4cce4aab2c9  app.asar.patched
+40a8dc291e045c3cc54ee4cce4aab2c9  app.asar.v24-context-menus
+bc72b913294d68a60b894f0fe83d6e0b  app.asar.v25-logging-theme-check
+bba9ee979c762d564ef76f881b531e86  app.asar.patched

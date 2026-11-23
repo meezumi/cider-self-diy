@@ -1,0 +1,233 @@
+--- a/src/renderer/views/pages/replay.ejs
++++ b/src/renderer/views/pages/replay.ejs
+@@ -4,7 +4,7 @@
+             <div class="replay-period" v-for="year in years" @click="getReplayYear(year.attributes.year)">
+                 <div class="artwork-container">
+                     <mediaitem-artwork :size="200"
+-                                       :url="year.relationships.playlist.data[0].attributes.artwork.url"></mediaitem-artwork>
++                                       :url="year.relationships?.playlist?.data?.[0]?.attributes?.artwork?.url ?? ''"></mediaitem-artwork>
+                 </div>
+                 {{ year.attributes.year }}
+             </div>
+@@ -22,16 +22,21 @@
+                 <h1 class="replay-header">{{ loaded.attributes.year }} {{$root.getLz('term.replay')}}</h1>
+                 <hr>
+                 <div class="row">
++                    <!-- A year still in progress has no yearly totals (Apple's own
++                         Replay shows only its months), so each stat appears only
++                         when Apple sent it; listening time is then the sum of the
++                         finished months. -->
+                     <div class="col">
+-                        <h4 @click="hourshow = !hourshow">{{convertToHours(loaded.attributes.listenTimeInMinutes)}}
+-                            {{$root.getLz('term.time.hours')}} 
+-                            {{hourshow ? "" : (loaded.attributes.listenTimeInMinutes % 60) }}
++                        <h4 v-if="totalMinutes != null" @click="hourshow = !hourshow">{{convertToHours(totalMinutes)}}
++                            {{$root.getLz('term.time.hours')}}
++                            {{hourshow ? "" : (totalMinutes % 60) }}
+                             {{hourshow ? "" : $root.getLz('term.time.minutes')}}</h4>
+-                        <h4>{{ loaded.attributes.uniqueAlbumCount }} {{$root.getLz('term.uniqueAlbums')}}</h4>
+-                        <h4>{{ loaded.attributes.uniqueArtistCount }} {{$root.getLz('term.uniqueArtists')}}</h4>
+-                        <h4>{{ loaded.attributes.uniqueSongCount }} {{$root.getLz('term.uniqueSongs')}}</h4>
++                        <p v-if="totalMinutes != null && minutesAreSoFar" class="replay-so-far">{{ soFarLabel }}</p>
++                        <h4 v-if="isNumber(loaded.attributes.uniqueAlbumCount)">{{ loaded.attributes.uniqueAlbumCount }} {{$root.getLz('term.uniqueAlbums')}}</h4>
++                        <h4 v-if="isNumber(loaded.attributes.uniqueArtistCount)">{{ loaded.attributes.uniqueArtistCount }} {{$root.getLz('term.uniqueArtists')}}</h4>
++                        <h4 v-if="isNumber(loaded.attributes.uniqueSongCount)">{{ loaded.attributes.uniqueSongCount }} {{$root.getLz('term.uniqueSongs')}}</h4>
+                     </div>
+-                    <div class="col-auto replay-playlist-container">
++                    <div class="col-auto replay-playlist-container" v-if="loaded.playlist">
+                         <mediaitem-square kind="card" :no-scale="true" :force-video="true"
+                                           :item="loaded.playlist"></mediaitem-square>
+                     </div>
+@@ -40,16 +45,20 @@
+                 <h3>{{$root.getLz('term.topArtists')}}</h3>
+                 <div class="well">
+                     <mediaitem-scroller-horizontal>
+-                        <div class="card replay-card" v-for="artistData in loaded.views['top-artists'].data">
++                        <div class="card replay-card" v-for="artistData in viewData('top-artists')" v-if="artistData.relationships?.artist?.data?.[0]">
+                             <div class="card-body">
+                                 <mediaitem-square :item="artistData.relationships.artist.data[0]"></mediaitem-square>
+                             </div>
+                             <div class="card-footer">
++                                <template v-if="isNumber(artistData.attributes?.listenTimeInMinutes)">
+                                 {{ convertToHours(artistData.attributes.listenTimeInMinutes) }}
+                                 {{$root.getLz('term.time.hours', {'count':
+                                 convertToHours(artistData.attributes.listenTimeInMinutes) })}}<br>
++                                </template>
++                                <template v-if="isNumber(artistData.attributes?.playCount)">
+                                 {{$root.getLz('term.listenedTo')}} {{ artistData.attributes.playCount }}
+                                 {{$root.getLz('term.times')}}
++                                </template>
+                             </div>
+                         </div>
+                     </mediaitem-scroller-horizontal>
+@@ -58,15 +67,19 @@
+                 <h3>{{$root.getLz('term.topAlbums')}}</h3>
+                 <div class="well">
+                     <mediaitem-scroller-horizontal>
+-                        <div class="card replay-card" v-for="albumData in loaded.views['top-albums'].data">
++                        <div class="card replay-card" v-for="albumData in viewData('top-albums')" v-if="albumData.relationships?.album?.data?.[0]">
+                             <div class="card-body">
+                                 <mediaitem-square :item="albumData.relationships.album.data[0]"></mediaitem-square>
+                             </div>
+                             <div class="card-footer">
++                                <template v-if="isNumber(albumData.attributes?.listenTimeInMinutes)">
+                                 {{ convertToHours(albumData.attributes.listenTimeInMinutes) }}
+                                 {{$root.getLz('term.time.hours', {'count':
+                                 convertToHours(albumData.attributes.listenTimeInMinutes)})}}<br>
++                                </template>
++                                <template v-if="isNumber(albumData.attributes?.playCount)">
+                                 {{ albumData.attributes.playCount }} {{$root.getLz('term.plays')}}
++                                </template>
+                             </div>
+                         </div>
+                     </mediaitem-scroller-horizontal>
+@@ -75,10 +88,12 @@
+                 <h3>{{$root.getLz('term.topSongs')}}</h3>
+                 <div class="well">
+                     <listitem-horizontal :show-library-status="false"
+-                                         :items="songsToArray(loaded.views['top-songs'].data)"></listitem-horizontal>
++                                         :items="songsToArray(viewData('top-songs'))"></listitem-horizontal>
+                 </div>
+-                <h3>{{$root.getLz('term.topGenres')}}</h3>
+-                <div class="top-genres-container">
++                <!-- Percentages of the top songs' play counts: without counts
++                     every one was NaN%. -->
++                <h3 v-if="loaded.topGenres && loaded.topGenres.length">{{$root.getLz('term.topGenres')}}</h3>
++                <div class="top-genres-container" v-if="loaded.topGenres && loaded.topGenres.length">
+                     <div v-for="genre in loaded.topGenres" class="replay-genre-display">
+                         <div class="genre-name">
+                             {{ genre.genre }}
+@@ -104,13 +119,38 @@
+           id: -1
+         },
+         hourshow: true,
+-        musicTypeGenre: ""
++        musicTypeGenre: "",
++        // Listening time added up from the monthly summaries, for a year with
++        // no yearly total: { year, minutes, months }.
++        yearToDate: { year: null, minutes: null, months: 0 }
+       }
+     },
++    computed: {
++      yearMinutes() {
++        const minutes = this.loaded.attributes?.listenTimeInMinutes
++        return this.isNumber(minutes) ? minutes : null
++      },
++      minutesAreSoFar() {
++        return this.yearMinutes == null && this.yearToDate.year == this.loaded.attributes?.year && this.yearToDate.minutes != null
++      },
++      totalMinutes() {
++        if (this.yearMinutes != null) {
++          return this.yearMinutes
++        }
++        return this.minutesAreSoFar ? this.yearToDate.minutes : null
++      },
++      soFarLabel() {
++        const months = this.yearToDate.months
++        const fallback = months == 1 ? "So far: Apple's Replay for 1 finished month" : "So far: Apple's Replay for " + months + " finished months"
++        const key = months == 1 ? "term.replay.soFarOne" : "term.replay.soFarOther"
++        const value = this.$root.getLz(key)
++        return typeof value == "string" && value != key ? value.replace("{count}", months) : fallback
++      },
++    },
+     async mounted() {
+       // Get available years
+       let year = await app.mk.api.v3.music("/v1/me/music-summaries/search?extend=inLibrary&period=year&fields[music-summaries]=period%2Cyear&include[music-summaries]=playlist")
+-      this.years = year.data.data
++      this.years = year.data.data ?? []
+       this.years.reverse()
+       localStorage.setItem("seenReplay", true)
+       this.getReplayYear();
+@@ -118,17 +158,31 @@
+       this.musicTypeGenre = musicGenre.data.data[0].attributes.name
+     },
+     methods: {
++      isNumber(value) {
++        return typeof value == "number" && isFinite(value)
++      },
++      // A view's items, or none when Apple left the view out.
++      viewData(name) {
++        return this.loaded.views?.[name]?.data ?? []
++      },
+       songsToArray(songsData) {
+         let self = this
+         let songs = []
+         let topGenres = {}
+         let genrePlayCount = 0;
+         songsData.forEach(function(songData) {
+-          let song = songData.relationships.song.data[0]
+-          song.attributes.playCount = songData.attributes.playCount
++          let song = songData.relationships?.song?.data?.[0]
++          if (!song) {
++            return
++          }
+           songs.push(song)
++          // Genres are shares of play count: a song without one adds nothing.
++          if (!self.isNumber(songData.attributes?.playCount)) {
++            return
++          }
++          song.attributes.playCount = songData.attributes.playCount
+           genrePlayCount += song.attributes.playCount
+-          song.attributes.genreNames.forEach(function(genre) {
++          ;(song.attributes.genreNames ?? []).forEach(function(genre) {
+             if (genre != self.musicTypeGenre) {
+               if (topGenres[genre] == undefined) {
+                 topGenres[genre] = song.attributes.playCount
+@@ -151,7 +205,7 @@
+         topGenresArray.forEach(function(genre) {
+           genre.count = Math.round(genre.count / genrePlayCount * 100)
+         })
+-        this.loaded.topGenres = topGenresArray
++        this.loaded.topGenres = genrePlayCount > 0 ? topGenresArray : []
+ 
+         return songs
+       },
+@@ -159,10 +213,45 @@
+         this.loaded.id = -1
+         let response = await app.mk.api.v3.music(`/v1/me/music-summaries/year-${year}?extend=inLibrary&views=top-artists%2Ctop-albums%2Ctop-songs&include[music-summaries]=playlist&include[playlists]=tracks&includeOnly=playlist%2Ctracks%2Csong%2Cartist%2Calbum`)
+         let replayData = response.data.data[0]
+-        // extended playlist
+-        let playlist = await app.mk.api.v3.music(replayData.relationships.playlist.data[0].href, { extend: "editorialArtwork,editorialVideo" })
+-        replayData.playlist = playlist.data.data[0]
++        replayData.attributes = replayData.attributes ?? {}
++        // extended playlist; a summary without one still shows its stats
++        const playlistHref = replayData.relationships?.playlist?.data?.[0]?.href
++        if (playlistHref) {
++          try {
++            let playlist = await app.mk.api.v3.music(playlistHref, { extend: "editorialArtwork,editorialVideo" })
++            replayData.playlist = playlist.data.data[0]
++          } catch (e) {
++            replayData.playlist = null
++          }
++        }
+         this.loaded = replayData
++        if (!this.isNumber(replayData.attributes.listenTimeInMinutes)) {
++          this.loadYearToDate(replayData.attributes.year ?? year)
++        }
++      },
++      // A year in progress has no yearly summary totals: Apple publishes one
++      // per finished month instead. Minutes add up across months, so the sum
++      // is the year so far. (Unique albums, artists and songs don't -- the
++      // same artist in two months is one artist -- so those stay hidden.)
++      // If the months can't be fetched or don't carry minutes, nothing shows.
++      async loadYearToDate(year) {
++        this.yearToDate = { year: null, minutes: null, months: 0 }
++        try {
++          const response = await app.mk.api.v3.music("/v1/me/music-summaries/search?period=month")
++          const months = (response.data.data ?? []).filter((summary) => {
++            const attributes = summary.attributes ?? {}
++            return (attributes.period ?? "month") == "month" && attributes.year == year && this.isNumber(attributes.listenTimeInMinutes)
++          })
++          if (months.length) {
++            this.yearToDate = {
++              year: year,
++              minutes: months.reduce((sum, summary) => sum + summary.attributes.listenTimeInMinutes, 0),
++              months: months.length,
++            }
++          }
++        } catch (e) {
++          // No monthly summaries: the page shows what the year summary has.
++        }
+       },
+       convertToHours(minutes) {
+         return Math.floor(minutes / 60)
