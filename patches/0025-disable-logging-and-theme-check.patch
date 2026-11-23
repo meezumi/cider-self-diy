@@ -1,0 +1,50 @@
+--- a/src/renderer/main/app.js
++++ b/src/renderer/main/app.js
+@@ -19,14 +19,17 @@
+ window.CiderFrontAPI = CiderFrontAPI;
+ window.wsapi = wsapi;
+ 
++// Silence every console method, not a hand-picked five: anything left out
++// was undefined, and MusicKit's own console.info call threw "console.info is
++// not a function" whenever Disable Logging was on.
+ if (app.cfg.advanced.disableLogging === true) {
+-  window.console = {
+-    log: function () {},
+-    error: function () {},
+-    warn: function () {},
+-    assert: function () {},
+-    debug: function () {},
+-  };
++  const silent = {};
++  for (const key of Object.getOwnPropertyNames(window.console)) {
++    if (typeof window.console[key] == "function") {
++      silent[key] = function () {};
++    }
++  }
++  window.console = silent;
+ }
+ 
+ // Mount Vue to #app
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -1416,7 +1416,19 @@
+       await asyncForEach(themes, async (theme) => {
+         if (theme.commit != "") {
+           if (theme.commit != "") {
+-            app._fetch(`https://api.github.com/repos/${theme.github_repo}/commits`).then((res) => res.json());
++            // The request was never awaited, so `res` was undefined here and
++            // this threw on every launch. GitHub answers a missing repo or a
++            // rate limit with an object, not a list of commits, and offline
++            // the request fails: none of those is an update.
++            let res;
++            try {
++              res = await app._fetch(`https://api.github.com/repos/${theme.github_repo}/commits`).then((res) => res.json());
++            } catch (e) {
++              return;
++            }
++            if (!Array.isArray(res) || !res[0]?.sha) {
++              return;
++            }
+             if (res[0].sha != theme.commit) {
+               const notify = notyf.open({
+                 className: "notyf-info",
