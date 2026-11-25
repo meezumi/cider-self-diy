@@ -1,0 +1,99 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -151,6 +151,9 @@
+     lyrics: [],
+     currentLyricsLine: 0,
+     richlyrics: [],
++    // Songwriters from the lyrics' own header, shown after the last line as
++    // Apple's web player does ("Written by: ...").
++    lyricsWriters: [],
+     lyricsMediaItem: {},
+     lyricsDebug: {
+       current: 0,
+@@ -1326,6 +1329,7 @@
+         self.chrome.artworkReady = false;
+         self.lyrics = [];
+         self.richlyrics = [];
++        self.lyricsWriters = [];
+         app.getCurrentArtURL().then((urls) => {
+           app.currentArtUrl = urls?.currentArtUrl ?? "";
+           app.currentArtUrlRaw = urls?.currentArtUrlRaw ?? "";
+@@ -4099,6 +4103,9 @@
+       this.lyrics = [];
+       let preLrc = [];
+       let xml = this.stringToXml(this.lyricsMediaItem);
++      // Apple's TTML names the writers in its head:
++      // <songwriters><songwriter>Name</songwriter>...</songwriters>.
++      this.lyricsWriters = [...xml.getElementsByTagName("songwriter")].map((writer) => writer.textContent.trim()).filter((name, i, all) => name && all.indexOf(name) == i);
+       let lyricsLines = xml.getElementsByTagName("p");
+       let synced = true;
+       let endTimes = [];
+--- a/src/renderer/views/components/lyrics-view.ejs
++++ b/src/renderer/views/components/lyrics-view.ejs
+@@ -33,6 +33,10 @@
+                     </div>
+                 </h3>
+             </template>
++            <!-- Who wrote it, after the last line, as Apple's player shows. -->
++            <div class="lyrics-credits" v-if="app.lyricsWriters && app.lyricsWriters.length">
++                {{ writtenBy }}
++            </div>
+         </template>
+         <template v-else>
+             <div class="no-lyrics">
+@@ -50,6 +54,15 @@
+         app: this.$root,
+       }
+     },
++    computed: {
++      // "Written by: A, B & C". getLz returns the key when a language lacks it.
++      writtenBy() {
++        const names = this.app.lyricsWriters ?? []
++        const list = names.length > 1 ? names.slice(0, -1).join(", ") + " & " + names[names.length - 1] : names.join("")
++        const label = this.app.getLz("term.writtenBy")
++        return (typeof label == "string" && label != "term.writtenBy" ? label : "Written by:") + " " + list
++      },
++    },
+     watch: {
+       time: function() {
+         if (((app.lyricon && app.drawer.open) || app.appMode == 'fullscreen') && this.$refs.lyricsview) {
+--- a/src/renderer/style.less
++++ b/src/renderer/style.less
+@@ -1766,6 +1766,18 @@
+   opacity: 0.6;
+ }
+ 
++// "Written by: ..." after the last lyric line (patch 0029). Packaged Cider
++// loads style.css, not this file, so the same rule is there too.
++.lyrics-credits {
++  margin: 28px 5% 48px;
++  padding: 0;
++  font-size: 13px;
++  font-weight: 600;
++  line-height: 1.45;
++  letter-spacing: 0.01em;
++  opacity: 0.45;
++}
++
+ .lyric-line.active .verse.verse-active {
+   opacity: 1;
+   transition: opacity 0.35s var(--appleEase);
+--- a/src/renderer/style.css
++++ b/src/renderer/style.css
+@@ -16242,6 +16242,16 @@
+ .lyric-line.active .verse {
+   opacity: 0.6;
+ }
++/* "Written by: ..." after the last lyric line (patch 0029). */
++.lyrics-credits {
++  margin: 28px 5% 48px;
++  padding: 0;
++  font-size: 13px;
++  font-weight: 600;
++  line-height: 1.45;
++  letter-spacing: 0.01em;
++  opacity: 0.45;
++}
+ .lyric-line.active .verse.verse-active {
+   opacity: 1;
+   transition: opacity 0.35s var(--appleEase);
