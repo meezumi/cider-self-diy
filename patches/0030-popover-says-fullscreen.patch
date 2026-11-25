@@ -1,0 +1,22 @@
+--- a/src/renderer/views/app/chrome-top.ejs
++++ b/src/renderer/views/app/chrome-top.ejs
+@@ -120,7 +120,7 @@
+                                 </button>
+                                 <button class="md-btn md-btn-small" style="width: 100%"
+                                         @click="drawer.open = false; fullscreen(true)">
+-                                    {{ $root.getLz("term.fullscreenView") }}
++                                    {{ $root.getLz("term.fullscreen") }}
+                                 </button>
+                             </div>
+                         </div>
+--- a/src/renderer/views/app/chrome-bottom.ejs
++++ b/src/renderer/views/app/chrome-bottom.ejs
+@@ -31,7 +31,7 @@
+                                   </button>
+                                   <button class="md-btn md-btn-small" style="width: 100%;"
+                                           @click="drawer.open = false; fullscreen(true)">{{
+-                                      $root.getLz("term.fullscreenView") }}
++                                      $root.getLz("term.fullscreen") }}
+                                   </button>
+                               </div>
+                           </div>
