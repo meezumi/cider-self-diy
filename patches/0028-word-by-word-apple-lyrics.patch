@@ -1,0 +1,110 @@
+--- a/src/renderer/main/vueapp.js
++++ b/src/renderer/main/vueapp.js
+@@ -3508,12 +3508,37 @@
+       const songID = this.mk.nowPlayingItem != null ? this.mk.nowPlayingItem["_songId"] ?? this.mk.nowPlayingItem["songId"] ?? -1 : -1;
+       // this.getMXM( trackName, artistName, 'en', duration);
+       if (songID != -1) {
++        // Word-timed lyrics first -- what Apple's web player shows, each word
++        // lighting up as it's sung -- and the line-timed ones when Apple has
++        // none for this song (or refuses), exactly as before.
++        const stillPlaying = () => (this.mk.nowPlayingItem?.["_songId"] ?? this.mk.nowPlayingItem?.["songId"] ?? -1) == songID;
++        let ttml = null;
++        try {
++          const response = await this.mk.api.v3.music(`v1/catalog/${this.mk.storefrontId}/songs/${songID}/syllable-lyrics`);
++          const attributes = response.data?.data?.[0]?.attributes ?? {};
++          ttml = attributes.ttml ?? attributes.ttmlLocalizations ?? null;
++        } catch (_) {
++          ttml = null;
++        }
++        if (!stillPlaying()) {
++          return;
++        }
++        if (typeof ttml == "string" && ttml.includes("<p")) {
++          this.lyricsMediaItem = ttml;
++          this.parseTTML();
++          return;
++        }
+         try {
+           let response = await this.mk.api.v3.music(`v1/catalog/${this.mk.storefrontId}/songs/${songID}/lyrics`);
++          if (!stillPlaying()) {
++            return;
++          }
+           this.lyricsMediaItem = response.data?.data[0]?.attributes["ttml"];
+           this.parseTTML();
+         } catch (_) {
+-          this.lyricsAfterAM();
++          if (stillPlaying()) {
++            this.lyricsAfterAM();
++          }
+         }
+       } else {
+         this.lyricsAfterAM();
+@@ -4038,8 +4063,37 @@
+       let hours = rawTime[2] != null ? rawTime[1].replace(":", "") : 0;
+       let minutes = rawTime[2] != null ? hours * 60 + rawTime[2].replace(":", "") * 1 : rawTime[1] != null ? rawTime[1].replace(":", "") : 0;
+       let seconds = rawTime[3] != null ? rawTime[3] : 0;
+-      let milliseconds = rawTime[4] != null ? rawTime[4].replace(".", "") : 0;
+-      return parseFloat(`${minutes * 60 + seconds * 1}.${milliseconds * 1}`);
++      // The fraction as written: "12.034" is 12.034 s. Reading its digits as a
++      // number dropped the leading zeros and made it 12.34.
++      let fraction = rawTime[4] != null ? parseFloat("0" + rawTime[4]) : 0;
++      return minutes * 60 + seconds * 1 + fraction;
++    },
++    // The timed words of one TTML line, for the lyrics view's word-by-word
++    // display: [{ c: text, o: seconds after the line starts }]. A word is a
++    // span with its own begin that holds no timed spans (Apple nests
++    // background vocals in a span of their own); the spaces between spans are
++    // kept with the word before them.
++    ttmlWords(line, lineStart) {
++      const words = [];
++      const walk = (node) => {
++        for (const child of node.childNodes) {
++          if (child.nodeType === 3) {
++            if (words.length) {
++              words[words.length - 1].c += child.textContent;
++            } else if (child.textContent.trim()) {
++              words.push({ c: child.textContent, o: 0 });
++            }
++          } else if (child.nodeType === 1) {
++            if (child.getAttribute("begin") && !child.querySelector("[begin]")) {
++              words.push({ c: child.textContent, o: Math.max(0, this.toMS(child.getAttribute("begin")) - lineStart) });
++            } else {
++              walk(child);
++            }
++          }
++        }
++      };
++      walk(line);
++      return words;
+     },
+     parseTTML() {
+       this.lyrics = [];
+@@ -4067,6 +4121,7 @@
+             startTime: start,
+             endTime: end,
+             line: element.textContent,
++            words: this.ttmlWords(element, start),
+           });
+           endTimes.push(end);
+         }
+@@ -4077,6 +4132,20 @@
+             endTime: preLrc[0].startTime,
+             line: "lrcInstrumental",
+           });
++        // Word-timed lyrics (syllable-lyrics): the view draws line i from
++        // richlyrics[i - 1], so one entry per line after the first dot -- an
++        // empty one for each instrumental gap, and the whole line as one piece
++        // for a line that came without timed words.
++        const wordTimed = preLrc.some((entry) => entry.words && entry.words.length > 1);
++        this.richlyrics = wordTimed
++          ? preLrc.slice(1).map((entry) => {
++              if (entry.line == "lrcInstrumental") {
++                return { l: [] };
++              }
++              return { l: entry.words && entry.words.length ? entry.words : [{ c: entry.line, o: 0 }] };
++            })
++          : [];
++        preLrc.forEach((entry) => delete entry.words);
+       } else {
+         for (let element of lyricsLines) {
+           preLrc.push({

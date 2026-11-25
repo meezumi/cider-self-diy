@@ -1,0 +1,108 @@
+--- a/src/renderer/views/pages/replay.ejs
++++ b/src/renderer/views/pages/replay.ejs
+@@ -22,16 +22,15 @@
+                 <h1 class="replay-header">{{ loaded.attributes.year }} {{$root.getLz('term.replay')}}</h1>
+                 <hr>
+                 <div class="row">
+-                    <!-- A year still in progress has no yearly totals (Apple's own
+-                         Replay shows only its months), so each stat appears only
+-                         when Apple sent it; listening time is then the sum of the
+-                         finished months. -->
++                    <!-- Each stat appears only when Apple sent it. A year still in
++                         progress has none of the yearly totals yet: Apple adds
++                         them once the year is over, so the page says so. -->
+                     <div class="col">
+                         <h4 v-if="totalMinutes != null" @click="hourshow = !hourshow">{{convertToHours(totalMinutes)}}
+                             {{$root.getLz('term.time.hours')}}
+                             {{hourshow ? "" : (totalMinutes % 60) }}
+                             {{hourshow ? "" : $root.getLz('term.time.minutes')}}</h4>
+-                        <p v-if="totalMinutes != null && minutesAreSoFar" class="replay-so-far">{{ soFarLabel }}</p>
++                        <p v-if="inProgress" class="replay-in-progress">{{ inProgressLabel }}</p>
+                         <h4 v-if="isNumber(loaded.attributes.uniqueAlbumCount)">{{ loaded.attributes.uniqueAlbumCount }} {{$root.getLz('term.uniqueAlbums')}}</h4>
+                         <h4 v-if="isNumber(loaded.attributes.uniqueArtistCount)">{{ loaded.attributes.uniqueArtistCount }} {{$root.getLz('term.uniqueArtists')}}</h4>
+                         <h4 v-if="isNumber(loaded.attributes.uniqueSongCount)">{{ loaded.attributes.uniqueSongCount }} {{$root.getLz('term.uniqueSongs')}}</h4>
+@@ -119,32 +118,26 @@
+           id: -1
+         },
+         hourshow: true,
+-        musicTypeGenre: "",
+-        // Listening time added up from the monthly summaries, for a year with
+-        // no yearly total: { year, minutes, months }.
+-        yearToDate: { year: null, minutes: null, months: 0 }
++        musicTypeGenre: ""
+       }
+     },
+     computed: {
+-      yearMinutes() {
++      totalMinutes() {
+         const minutes = this.loaded.attributes?.listenTimeInMinutes
+         return this.isNumber(minutes) ? minutes : null
+       },
+-      minutesAreSoFar() {
+-        return this.yearMinutes == null && this.yearToDate.year == this.loaded.attributes?.year && this.yearToDate.minutes != null
+-      },
+-      totalMinutes() {
+-        if (this.yearMinutes != null) {
+-          return this.yearMinutes
+-        }
+-        return this.minutesAreSoFar ? this.yearToDate.minutes : null
+-      },
+-      soFarLabel() {
+-        const months = this.yearToDate.months
+-        const fallback = months == 1 ? "So far: Apple's Replay for 1 finished month" : "So far: Apple's Replay for " + months + " finished months"
+-        const key = months == 1 ? "term.replay.soFarOne" : "term.replay.soFarOther"
+-        const value = this.$root.getLz(key)
+-        return typeof value == "string" && value != key ? value.replace("{count}", months) : fallback
++      // The current year (or a later one, if the clock is ahead) with no
++      // yearly totals yet. A past year without them gets no note: it isn't
++      // going to fill in.
++      inProgress() {
++        const year = Number(this.loaded.attributes?.year)
++        return this.totalMinutes == null && isFinite(year) && year >= new Date().getFullYear()
++      },
++      inProgressLabel() {
++        const year = this.loaded.attributes?.year
++        const fallback = year + " is still in progress. Apple adds the year's totals once it ends, so check back later."
++        const value = this.$root.getLz("term.replay.inProgress")
++        return typeof value == "string" && value != "term.replay.inProgress" ? value.replace("{year}", year) : fallback
+       },
+     },
+     async mounted() {
+@@ -224,34 +217,10 @@
+             replayData.playlist = null
+           }
+         }
++        // The year summary's own year, so the in-progress note can't name
++        // the wrong one.
++        replayData.attributes.year = replayData.attributes.year ?? year
+         this.loaded = replayData
+-        if (!this.isNumber(replayData.attributes.listenTimeInMinutes)) {
+-          this.loadYearToDate(replayData.attributes.year ?? year)
+-        }
+-      },
+-      // A year in progress has no yearly summary totals: Apple publishes one
+-      // per finished month instead. Minutes add up across months, so the sum
+-      // is the year so far. (Unique albums, artists and songs don't -- the
+-      // same artist in two months is one artist -- so those stay hidden.)
+-      // If the months can't be fetched or don't carry minutes, nothing shows.
+-      async loadYearToDate(year) {
+-        this.yearToDate = { year: null, minutes: null, months: 0 }
+-        try {
+-          const response = await app.mk.api.v3.music("/v1/me/music-summaries/search?period=month")
+-          const months = (response.data.data ?? []).filter((summary) => {
+-            const attributes = summary.attributes ?? {}
+-            return (attributes.period ?? "month") == "month" && attributes.year == year && this.isNumber(attributes.listenTimeInMinutes)
+-          })
+-          if (months.length) {
+-            this.yearToDate = {
+-              year: year,
+-              minutes: months.reduce((sum, summary) => sum + summary.attributes.listenTimeInMinutes, 0),
+-              months: months.length,
+-            }
+-          }
+-        } catch (e) {
+-          // No monthly summaries: the page shows what the year summary has.
+-        }
+       },
+       convertToHours(minutes) {
+         return Math.floor(minutes / 60)
